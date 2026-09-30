@@ -4,12 +4,16 @@
   "description": "A dependency-free CLI for comparing EVM JSON-RPC endpoints.",
   "type": "module",
   "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/Tojen-dev/rpc-doctor.git" },
+  "homepage": "https://github.com/Tojen-dev/rpc-doctor#readme",
+  "bugs": { "url": "https://github.com/Tojen-dev/rpc-doctor/issues" },
+  "keywords": ["ethereum", "evm", "rpc", "json-rpc", "benchmark", "cli"],
   "engines": { "node": ">=22" },
   "bin": { "rpc-doctor": "bin/rpc-doctor.js" },
   "files": ["bin", "src", "README.md", "LICENSE"],
   "scripts": {
     "start": "node bin/rpc-doctor.js",
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
     "check": "node scripts/check.js"
   }
 }
