@@ -1,0 +1,15 @@
+{
+  "name": "@tojen-dev/rpc-doctor",
+  "version": "0.1.0",
+  "description": "A dependency-free CLI for comparing EVM JSON-RPC endpoints.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "bin": { "rpc-doctor": "bin/rpc-doctor.js" },
+  "files": ["bin", "src", "README.md", "LICENSE"],
+  "scripts": {
+    "start": "node bin/rpc-doctor.js",
+    "test": "node --test",
+    "check": "node scripts/check.js"
+  }
+}
