@@ -14,6 +14,7 @@ Usage:
 Options:
   --samples <n>       Block-number samples per endpoint, 1–100 (default: 5)
   --timeout <ms>      Timeout per request, 1–60000 (default: 5000)
+  --label <name>      Repeat once per endpoint, in input order (default: RPC N)
   --json             Write a versioned JSON report
   --demo             Compare three synthetic local endpoints
   --help, -h         Show help
@@ -21,6 +22,9 @@ Options:
 
 At most 20 endpoints; up to four are probed concurrently. No transactions sent.
 Use environment input for API-key URLs to avoid storing them in shell history.
+Labels also name environment URLs; with --demo, supply three labels or none.
+Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
+Control characters become spaces; whitespace is collapsed and trimmed.
 Exit codes: 0 = completed; 1 = all endpoints failed; 2 = invalid usage/runtime error.
 `;
 
@@ -30,6 +34,7 @@ export async function main(args, env, stdout, stderr) {
     try {
       parsed = parseArgs({ args, allowPositionals: true, strict: true, options: {
         samples: { type: 'string', default: '5' }, timeout: { type: 'string', default: '5000' },
+        label: { type: 'string', multiple: true },
         json: { type: 'boolean' }, demo: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       } });
@@ -44,7 +49,7 @@ export async function main(args, env, stdout, stderr) {
     if (!/^\d+$/.test(values.samples) || !/^\d+$/.test(values.timeout)) {
       throw new Error('Samples and timeout must be positive integers.');
     }
-    const options = { samples: Number(values.samples), timeoutMs: Number(values.timeout) };
+    const options = { samples: Number(values.samples), timeoutMs: Number(values.timeout), labels: values.label };
     let endpoints = positionals;
     if (values.demo && endpoints.length) throw new Error('Use --demo without endpoint URLs.');
     if (!values.demo && endpoints.length === 0 && env.RPC_DOCTOR_ENDPOINTS_JSON) {
@@ -60,7 +65,7 @@ export async function main(args, env, stdout, stderr) {
     return report.results.every((result) => result.status === 'unreachable') ? 1 : 0;
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
-    const expected = /^(Use |Provide |Samples |Timeout |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
+    const expected = /^(Use |Provide |Samples |Timeout |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
     stderr.write(`RPC Doctor: ${expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }

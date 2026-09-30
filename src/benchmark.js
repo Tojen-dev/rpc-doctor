@@ -13,9 +13,28 @@ export function latencyStats(values) {
   };
 }
 
-async function probe(url, index, samples, timeoutMs) {
+function endpointLabels(labels, count) {
+  if (labels === undefined) return Array.from({ length: count }, (_, index) => `RPC ${index + 1}`);
+  if (!Array.isArray(labels) || labels.length !== count) {
+    throw new Error('Provide exactly one --label per endpoint, in input order.');
+  }
+  return Array.from(labels, (label) => {
+    if (typeof label !== 'string') throw new Error('Labels must be strings.');
+    // Neutralize terminal controls, bidi/format controls, and Unicode line separators.
+    const clean = label.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/gu, ' ').trim();
+    if (clean.length === 0 || Array.from(clean).length > 64) {
+      throw new Error('Labels must contain 1–64 characters after whitespace normalization.');
+    }
+    if (/https?\s*:|[a-z][a-z\d+.-]*:\s*\/\s*\/|www\./iu.test(clean)) {
+      throw new Error('Labels must be names, not URLs.');
+    }
+    return clean;
+  });
+}
+
+async function probe(url, label, samples, timeoutMs) {
   const result = {
-    endpoint: `RPC ${index + 1}`, chainId: null, latestBlock: null,
+    endpoint: label, chainId: null, latestBlock: null,
     attempts: 0, successes: 0, errors: {}, latencyMs: latencyStats([]),
     successRate: 0, lagBlocks: null, peerCount: 0, status: 'unreachable',
   };
@@ -71,7 +90,7 @@ export function addPeerComparison(results) {
   return results;
 }
 
-export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000 } = {}) {
+export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000, labels } = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
   }
@@ -81,6 +100,7 @@ export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000 } = {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) {
     throw new Error('Timeout must be an integer from 1 to 60000 ms.');
   }
+  const names = endpointLabels(labels, endpoints.length);
   const urls = endpoints.map(validateEndpoint);
   if (new Set(urls).size !== urls.length) throw new Error('Duplicate endpoints are not allowed.');
   const started = performance.now();
@@ -89,7 +109,7 @@ export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000 } = {
   async function worker() {
     while (next < urls.length) {
       const index = next++;
-      results[index] = await probe(urls[index], index, samples, timeoutMs);
+      results[index] = await probe(urls[index], names[index], samples, timeoutMs);
     }
   }
   await Promise.all(Array.from({ length: Math.min(4, urls.length) }, worker));

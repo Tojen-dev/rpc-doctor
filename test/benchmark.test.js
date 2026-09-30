@@ -72,3 +72,22 @@ test('validates configuration before any network request', async () => {
   await assert.rejects(benchmark(['https://example.com'], { timeoutMs: Infinity }), /Timeout/);
   await assert.rejects(benchmark(['https://example.com', 'https://example.com/']), /Duplicate/);
 });
+
+test('validates label arrays and string values before any RPC request', async (t) => {
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const labels of [null, 'Primary', [], ['First', 'Extra'], [null], [1], [{}], [true], new Array(1)]) {
+    await assert.rejects(benchmark([server.url], { labels }), /^(Error: )?(Provide |Labels )/);
+  }
+  assert.equal(requests, 0);
+});
+
+test('label length counts Unicode code points after normalization', async (t) => {
+  const server = await serve((req, res) => reply(res, '0x1'));
+  t.after(server.close);
+  const name = '🛰'.repeat(64);
+  const report = await benchmark([server.url], { samples: 1, labels: [`  ${name}\t `] });
+  assert.equal(report.results[0].endpoint, name);
+  await assert.rejects(benchmark([server.url], { labels: ['🛰'.repeat(65)] }), /Labels must contain/);
+});

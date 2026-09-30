@@ -51,9 +51,30 @@ node bin/rpc-doctor.js --samples 10 --json > report.json
 ```
 
 Environment input keeps URLs out of command arguments. Do not paste actual keys
-into commands saved in shell history. Reports use `RPC 1`, `RPC 2`, etc. in input
-order; they never include endpoint URLs or raw provider error messages. Environment
-variables remain accessible to processes with sufficient local permissions.
+into commands saved in shell history. Reports use `RPC 1`, `RPC 2`, etc. by default,
+in input order; they never include endpoint URLs or raw provider error messages.
+Environment variables remain accessible to processes with sufficient local permissions.
+
+To name endpoints, repeat `--label <name>` once for each URL, in the same order:
+
+```sh
+node bin/rpc-doctor.js --label "Primary node" --label "Backup node" \
+  https://your-first-rpc.example https://your-second-rpc.example
+
+# The same labels work with URLs already set in RPC_DOCTOR_ENDPOINTS_JSON:
+node bin/rpc-doctor.js --label "Primary node" --label "Backup node" --json
+```
+
+If any labels are supplied, their count must match the selected URL list. Positional
+URLs still take precedence over environment URLs. Table rows and JSON `endpoint`
+fields use the same labels and preserve input order, even when probes finish out of
+order or fail. With `--demo`, provide three labels or none.
+
+Labels are public report text: use descriptive names, never secrets or URLs.
+URL-shaped labels are rejected without echoing their contents. Control characters
+(including terminal and Unicode format controls) become spaces; whitespace is
+collapsed and trimmed. Each resulting name must contain 1–64 Unicode code points.
+Invalid labels produce exit code `2` before any RPC request.
 
 Optional local installation, from the cloned repository:
 
@@ -93,6 +114,7 @@ Five samples make a quick check, not a statistically robust p95 benchmark.
 | --- | --- | --- |
 | `--samples <n>` | 5 | 1–100 samples per endpoint |
 | `--timeout <ms>` | 5000 | 1–60000 ms per complete request, including body |
+| `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--json` | Off | JSON only on stdout; `schemaVersion: 1` |
 | `--demo` | Off | Synthetic local endpoints; ignores environment URLs |
 | `--help`, `-h` | | Usage |
