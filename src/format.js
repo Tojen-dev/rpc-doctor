@@ -11,7 +11,7 @@ export function formatTable(report) {
   return [
     report.demo ? 'RPC Doctor · local demo (synthetic endpoints)' : 'RPC Doctor', '',
     line(headers), line(widths.map((w) => '─'.repeat(w))), ...rows.map(line), '',
-    `Samples: ${report.settings.samples} · Timeout: ${report.settings.timeoutMs}ms · Elapsed: ${report.durationMs}ms`,
+    `Samples: ${report.settings.samples} · Timeout: ${report.settings.timeoutMs}ms · Concurrency: ${report.settings.concurrency} · Elapsed: ${report.durationMs}ms`,
     'Lag is relative to observed same-chain peers; — means no comparison is available.',
     'Endpoint labels follow input order. URLs are omitted to protect API keys.',
     ...(errors.length ? ['', 'Errors:', ...errors] : []),

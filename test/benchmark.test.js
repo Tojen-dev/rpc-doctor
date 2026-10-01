@@ -49,23 +49,6 @@ test('a chain handshake failure is reported without inventing samples', async (t
   assert.equal(results[0].errors.INVALID_RESULT, 1);
 });
 
-test('limits concurrency to four endpoints', async (t) => {
-  let active = 0;
-  let peak = 0;
-  const servers = await Promise.all(Array.from({ length: 6 }, () => serve(async (req, res) => {
-    active++;
-    peak = Math.max(peak, active);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    active--;
-    reply(res, '0x1');
-  })));
-  for (const server of servers) t.after(server.close);
-  const report = await benchmark(servers.map((server) => server.url), { samples: 1 });
-  assert.ok(peak <= 4);
-  assert.ok(peak > 1);
-  assert.deepEqual(report.results.map((r) => r.endpoint), ['RPC 1', 'RPC 2', 'RPC 3', 'RPC 4', 'RPC 5', 'RPC 6']);
-});
-
 test('validates configuration before any network request', async () => {
   await assert.rejects(benchmark([]), /between 1 and 20/);
   await assert.rejects(benchmark(['https://example.com'], { samples: 0 }), /Samples/);

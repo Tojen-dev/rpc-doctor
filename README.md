@@ -99,7 +99,8 @@ relative to the current working directory. Start with
     { "label": "Local node", "url": "http://127.0.0.1:8545" }
   ],
   "samples": 10,
-  "timeout": 3000
+  "timeout": 3000,
+  "concurrency": 4
 }
 ```
 
@@ -116,19 +117,21 @@ the environment, not the file. Labels follow the same sanitization rules as
 `--label`. No paths, environment variable names/values, or raw JSON contents appear
 in config error messages.
 
-The file must be a regular file of at most 64 KiB. Only `endpoints`, `samples`, and
-`timeout` are allowed at the top level; all are optional. A settings-only file such
-as `{"samples": 10}` works with CLI or environment URLs. If present, `endpoints`
+The file must be a regular file of at most 64 KiB. Only `endpoints`, `samples`,
+`timeout`, and `concurrency` are allowed at the top level; all are optional. A
+settings-only file such as `{"samples": 10}` works with CLI or environment URLs. If present, `endpoints`
 must contain 1–20 entries with distinct HTTP(S) URLs. Unknown fields at either
 level, wrong types, userinfo/fragments, and missing environment references are
 errors. `samples` must be an integer from 1 to 100; `timeout` is an integer from
-1 to 60000 milliseconds. JSON strings are not accepted as numeric settings.
+1 to 60000 milliseconds; `concurrency` is an integer from 1 to 20. JSON strings are
+not accepted as numeric settings.
 
 | Input | Priority, highest first |
 | --- | --- |
 | Endpoint list | Positional URLs → config `endpoints` → `RPC_DOCTOR_ENDPOINTS_JSON` |
 | Endpoint names | Explicit `--label` list → selected config endpoint labels → `RPC N` |
 | Samples / timeout | Explicit CLI option → config value → 5 / 5000 ms |
+| Concurrency | Explicit `--concurrency` → config `concurrency` → 4 |
 
 Endpoint lists are replaced as a whole, never merged. Config names are discarded
 when positional URLs replace config endpoints; they never label environment URLs.
@@ -159,10 +162,23 @@ visible in the report. A failed chain handshake produces zero block samples.
 
 These are client-observed timings, including network and provider overhead. The
 chain handshake usually establishes the connection before measured samples. There
-are no retries. Up to four endpoints run concurrently; later endpoints may observe
-later blocks. Relative lag is approximate, not a synchronized or trusted chain-head
+are no retries. By default, up to four endpoints run concurrently; later endpoints
+may observe later blocks. Relative lag is approximate, not a synchronized or trusted chain-head
 measurement. A single endpoint, or peers that are all behind, cannot establish freshness.
 Five samples make a quick check, not a statistically robust p95 benchmark.
+
+Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including both
+chain handshakes and block samples. Each endpoint's requests remain sequential;
+a worker moves to the next endpoint only after completing its current probe.
+Failures and timeouts release the worker without retries or hiding failed attempts.
+Aborting a timed-out request cannot guarantee that a remote provider stops processing it.
+Results and labels stay in input order regardless of completion order.
+
+For example, `node bin/rpc-doctor.js --demo --concurrency 1` probes the demo endpoints
+one at a time. A limit above the number of endpoints is accepted and creates no
+extra requests. The table summary and existing JSON `settings.concurrency` field
+report the effective worker count: the smaller of the selected limit and endpoint
+count. `schemaVersion` remains `1`.
 
 ## Options and exit codes
 
@@ -171,6 +187,7 @@ Five samples make a quick check, not a statistically robust p95 benchmark.
 | `--config <file>` | None | Explicit JSON file, at most 64 KiB; incompatible with `--demo` |
 | `--samples <n>` | 5 | 1–100 samples per endpoint |
 | `--timeout <ms>` | 5000 | 1–60000 ms per complete request, including body |
+| `--concurrency <n>` | 4 | 1–20 simultaneous RPC requests; CLI overrides config; works with `--demo` |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--json` | Off | JSON only on stdout; `schemaVersion: 1` |
 | `--demo` | Off | Synthetic local endpoints; ignores environment URLs |

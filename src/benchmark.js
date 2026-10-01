@@ -72,7 +72,7 @@ export function addPeerComparison(results) {
   return results;
 }
 
-export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000, labels } = {}) {
+export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000, concurrency = 4, labels } = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
   }
@@ -82,11 +82,15 @@ export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000, labe
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) {
     throw new Error('Timeout must be an integer from 1 to 60000 ms.');
   }
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 20) {
+    throw new Error('Concurrency must be an integer from 1 to 20.');
+  }
   const names = endpointLabels(labels, endpoints.length);
   const urls = endpoints.map(validateEndpoint);
   if (new Set(urls).size !== urls.length) throw new Error('Duplicate endpoints are not allowed.');
   const started = performance.now();
   const results = new Array(urls.length);
+  const workerCount = Math.min(concurrency, urls.length);
   let next = 0;
   async function worker() {
     while (next < urls.length) {
@@ -94,12 +98,12 @@ export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000, labe
       results[index] = await probe(urls[index], names[index], samples, timeoutMs);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(4, urls.length) }, worker));
+  await Promise.all(Array.from({ length: workerCount }, worker));
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     durationMs: Math.round(performance.now() - started),
-    settings: { samples, timeoutMs, concurrency: Math.min(4, urls.length), lagThreshold: 3 },
+    settings: { samples, timeoutMs, concurrency: workerCount, lagThreshold: 3 },
     results: addPeerComparison(results),
   };
 }

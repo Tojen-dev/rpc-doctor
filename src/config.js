@@ -41,8 +41,8 @@ function hasOnlyKeys(value, keys) {
 
 export async function loadConfig(path, env) {
   const config = await readConfig(path);
-  if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout'])) {
-    throw new ConfigError('Config must be an object containing only endpoints, samples, and timeout.');
+  if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout', 'concurrency'])) {
+    throw new ConfigError('Config must be an object containing only endpoints, samples, timeout, and concurrency.');
   }
   const result = {};
   if (Object.hasOwn(config, 'samples')) {
@@ -56,6 +56,12 @@ export async function loadConfig(path, env) {
       throw new ConfigError('Config timeout must be an integer from 1 to 60000 ms.');
     }
     result.timeoutMs = config.timeout;
+  }
+  if (Object.hasOwn(config, 'concurrency')) {
+    if (!Number.isInteger(config.concurrency) || config.concurrency < 1 || config.concurrency > 20) {
+      throw new ConfigError('Config concurrency must be an integer from 1 to 20.');
+    }
+    result.concurrency = config.concurrency;
   }
   if (Object.hasOwn(config, 'endpoints')) {
     if (!Array.isArray(config.endpoints) || config.endpoints.length < 1 || config.endpoints.length > 20) {

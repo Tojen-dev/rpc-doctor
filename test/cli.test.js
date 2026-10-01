@@ -15,6 +15,7 @@ test('help and version do not need network access', async () => {
   const help = await run(['--help']);
   assert.equal(help.code, 0);
   assert.match(help.out, /--label <name>/);
+  assert.match(help.out, /--concurrency <n>/);
   assert.equal((await run(['--version'])).out, '0.1.0\n');
   assert.equal((await run([])).code, 2);
 });
@@ -195,4 +196,35 @@ test('demo accepts three explicit labels in table and JSON', async () => {
     }
   }
   assert.equal((await run(['--demo', '--label', 'Only one'])).code, 2);
+});
+
+test('CLI rejects malformed or out-of-range concurrency without requests or input disclosure', async (t) => {
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const value of ['', '0', '-1', '21', '1.5', '1e1', '0x2', ' 2', '2\n', 'NaN', 'Infinity', 'SYNTHETIC_SECRET\x1b']) {
+    const result = await run(['--concurrency', value, `${server.url}/SYNTHETIC_SECRET`]);
+    assert.equal(result.code, 2);
+    assert.equal(result.out, '');
+    assert.match(result.err, /^RPC Doctor: (Concurrency |Invalid arguments\.)/);
+    assert.equal(result.err.includes('SYNTHETIC_SECRET'), false);
+    assert.equal(result.err.includes(server.url), false);
+    assert.doesNotMatch(result.err.trimEnd(), /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+  }
+  assert.equal((await run(['--concurrency'])).code, 2);
+  assert.equal(requests, 0);
+});
+
+test('demo supports concurrency in table and JSON while preserving failures and exit codes', async () => {
+  const table = await run(['--demo', '--samples', '3', '--concurrency', '1']);
+  assert.equal(table.code, 0, table.err);
+  assert.match(table.out, /Concurrency: 1/);
+  assert.match(table.out, /RATE_LIMITED/);
+  const json = await run(['--demo', '--samples', '3', '--concurrency', '20', '--json']);
+  assert.equal(json.code, 0, json.err);
+  const report = JSON.parse(json.out);
+  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.settings.concurrency, 3);
+  assert.deepEqual(report.results.map((r) => r.endpoint), ['RPC 1', 'RPC 2', 'RPC 3']);
+  assert.deepEqual(report.results[2].errors, { RATE_LIMITED: 1 });
 });

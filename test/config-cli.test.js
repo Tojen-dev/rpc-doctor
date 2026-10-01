@@ -115,6 +115,54 @@ test('settings-only config uses environment endpoints, CLI labels, and missing-s
   assert.equal((await run(['--config', path], {})).code, 2);
 });
 
+test('concurrency uses CLI over config over default, including settings-only config and environment URLs', async (t) => {
+  const { path } = await fixture(t);
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  const endpoints = Array.from({ length: 5 }, (_, index) => ({ label: `Node ${index}`, url: `${server.url}/${index}` }));
+  const env = { RPC_DOCTOR_ENDPOINTS_JSON: JSON.stringify(endpoints.map((e) => e.url)) };
+  for (const [config, flags, expected] of [
+    [{ endpoints }, [], 4],
+    [{ endpoints, concurrency: 2 }, [], 2],
+    [{ endpoints, concurrency: 2 }, ['--concurrency', '1'], 1],
+    [{ endpoints, concurrency: 1 }, ['--concurrency', '20'], 5],
+    [{ concurrency: 3 }, [], 3],
+  ]) {
+    await writeFile(path, JSON.stringify(config));
+    requests = 0;
+    const result = await run(['--config', path, '--samples', '1', '--json', ...flags], env);
+    assert.equal(result.code, 0, result.err);
+    const report = JSON.parse(result.out);
+    assert.equal(report.settings.concurrency, expected);
+    assert.equal(report.results.length, 5);
+    assert.equal(requests, 10);
+  }
+});
+
+test('CLI concurrency cannot hide invalid config concurrency and failures keep exit code 1', async (t) => {
+  const { path } = await fixture(t);
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; res.writeHead(503).end(); });
+  t.after(server.close);
+  for (const concurrency of [null, false, '2', 0, -1, 1.5, 21, 'SYNTHETIC_SECRET']) {
+    await writeFile(path, JSON.stringify({ concurrency }));
+    const result = await run(['--config', path, '--concurrency', '1', server.url]);
+    assert.equal(result.code, 2);
+    assert.equal(result.out, '');
+    assert.equal(result.err, 'RPC Doctor: Config concurrency must be an integer from 1 to 20.\n');
+  }
+  assert.equal(requests, 0);
+  await writeFile(path, '{"concurrency":1}');
+  const failed = await run(['--config', path, '--json', server.url]);
+  assert.equal(failed.code, 1);
+  const report = JSON.parse(failed.out);
+  assert.equal(report.settings.concurrency, 1);
+  assert.equal(report.results[0].status, 'unreachable');
+  assert.deepEqual(report.results[0].errors, { HTTP_ERROR: 1 });
+  assert.equal(requests, 1);
+});
+
 test('explicit config is fully validated even when overridden, before any request, without leaking input', async (t) => {
   const { directory, path } = await fixture(t);
   let requests = 0;

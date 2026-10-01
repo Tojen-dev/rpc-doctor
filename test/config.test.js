@@ -17,17 +17,17 @@ test('loads named URLs and entire-URL environment references with safe labels an
     endpoints: [
       { label: '  Primary\n\x1b\u202e node ', urlEnv: 'PRIMARY_RPC_URL' },
       { label: 'Резервний вузол', url: 'http://127.0.0.1:8545' },
-    ], samples: 100, timeout: 60000,
+    ], samples: 100, timeout: 60000, concurrency: 20,
   }));
   const result = await loadConfig(path, { PRIMARY_RPC_URL: 'https://rpc.example/SYNTHETIC_SECRET' });
   assert.deepEqual(result, {
     endpoints: ['https://rpc.example/SYNTHETIC_SECRET', 'http://127.0.0.1:8545/'],
-    labels: ['Primary node', 'Резервний вузол'], samples: 100, timeoutMs: 60000,
+    labels: ['Primary node', 'Резервний вузол'], samples: 100, timeoutMs: 60000, concurrency: 20,
   });
   await writeFile(path, '{}');
   assert.deepEqual(await loadConfig(path, {}), {});
-  await writeFile(path, '{"samples":1,"timeout":1}');
-  assert.deepEqual(await loadConfig(path, {}), { samples: 1, timeoutMs: 1 });
+  await writeFile(path, '{"samples":1,"timeout":1,"concurrency":1}');
+  assert.deepEqual(await loadConfig(path, {}), { samples: 1, timeoutMs: 1, concurrency: 1 });
 });
 
 test('rejects invalid structures, types, unknown fields, URLs and labels with static errors', async (t) => {
@@ -38,6 +38,7 @@ test('rejects invalid structures, types, unknown fields, URLs and labels with st
     { SYNTHETIC_SECRET: true }, { timeoutMs: 200 }, { labels: ['Primary'] },
     ...[null, '1', false, 0, -1, 1.5, 101].map((samples) => ({ samples })),
     ...[null, '100', false, 0, -1, 1.5, 60001].map((timeout) => ({ timeout })),
+    ...[null, '1', false, 0, -1, 1.5, 21, [], {}].map((concurrency) => ({ concurrency })),
     ...[null, {}, [], 'SYNTHETIC_SECRET'].map((endpoints) => ({ endpoints })),
     { endpoints: Array.from({ length: 21 }, (_, i) => ({ label: `Node ${i}`, url: `https://rpc.example/${i}` })) },
     ...[null, [], 'SYNTHETIC_SECRET', {}, { url: endpoint.url }, { label: 'Primary' },
@@ -124,5 +125,6 @@ test('accepts twenty endpoints and validates the shipped secret-free example wit
   assert.deepEqual(example.labels, ['Primary node', 'Local node']);
   assert.equal(example.samples, 10);
   assert.equal(example.timeoutMs, 3000);
+  assert.equal(example.concurrency, 4);
   assert.match(await readFile(examplePath, 'utf8'), /"urlEnv": "PRIMARY_RPC_URL"/);
 });

@@ -20,7 +20,7 @@ fix it first and record the reason; the exact commit count is a planning target.
 
 - [x] **06. Human-readable endpoint labels.** Accept explicit names, preserve input order, and sanitize control characters without leaking URLs.
 - [x] **07. Local configuration files.** Load named endpoints and settings from a validated JSON file; allow environment references for secrets; define precedence.
-- [ ] **08. Configurable concurrency.** Expose a bounded worker count and prove request concurrency never exceeds it.
+- [x] **08. Configurable concurrency.** Expose a bounded worker count and prove request concurrency never exceeds it.
 - [ ] **09. Configurable lag policy.** Support a lag threshold and explicit reference endpoint, with unavailable-reference behavior.
 - [ ] **10. Expected network guard.** Allow an expected chain ID and flag mismatches without comparing unrelated chains.
 - [ ] **11. Explicit warm-up.** Add optional warm-up requests; separate their failures and overhead from measured samples.
