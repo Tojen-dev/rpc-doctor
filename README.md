@@ -85,6 +85,62 @@ rpc-doctor --help
 
 This project is distributed through GitHub; no npm registry release is required.
 
+## Local configuration
+
+Use `--config FILE` to load a UTF-8 JSON file explicitly. There is no automatic
+config search, code execution, `.env` loading, or variable interpolation. Paths are
+relative to the current working directory. Start with
+[`examples/rpc-doctor.json`](examples/rpc-doctor.json):
+
+```json
+{
+  "endpoints": [
+    { "label": "Primary node", "urlEnv": "PRIMARY_RPC_URL" },
+    { "label": "Local node", "url": "http://127.0.0.1:8545" }
+  ],
+  "samples": 10,
+  "timeout": 3000
+}
+```
+
+Set `PRIMARY_RPC_URL` through your environment or secret manager before running:
+
+```sh
+node bin/rpc-doctor.js --config examples/rpc-doctor.json --json
+```
+
+Each endpoint requires a public `label` and exactly one of `url` or `urlEnv`.
+`urlEnv` names an environment variable containing the **entire URL**; its name must
+match `[A-Za-z_][A-Za-z0-9_]*`, and its value must be non-empty. Keep secret URLs in
+the environment, not the file. Labels follow the same sanitization rules as
+`--label`. No paths, environment variable names/values, or raw JSON contents appear
+in config error messages.
+
+The file must be a regular file of at most 64 KiB. Only `endpoints`, `samples`, and
+`timeout` are allowed at the top level; all are optional. A settings-only file such
+as `{"samples": 10}` works with CLI or environment URLs. If present, `endpoints`
+must contain 1–20 entries with distinct HTTP(S) URLs. Unknown fields at either
+level, wrong types, userinfo/fragments, and missing environment references are
+errors. `samples` must be an integer from 1 to 100; `timeout` is an integer from
+1 to 60000 milliseconds. JSON strings are not accepted as numeric settings.
+
+| Input | Priority, highest first |
+| --- | --- |
+| Endpoint list | Positional URLs → config `endpoints` → `RPC_DOCTOR_ENDPOINTS_JSON` |
+| Endpoint names | Explicit `--label` list → selected config endpoint labels → `RPC N` |
+| Samples / timeout | Explicit CLI option → config value → 5 / 5000 ms |
+
+Endpoint lists are replaced as a whole, never merged. Config names are discarded
+when positional URLs replace config endpoints; they never label environment URLs.
+Explicit `--label` values rename the entire selected list and must match its count.
+An unused `RPC_DOCTOR_ENDPOINTS_JSON` is ignored. An explicitly supplied config is
+always fully validated, including environment references and overridden settings,
+before any RPC request. CLI overrides do not hide config errors.
+
+`--demo` rejects `--config` and still ignores environment URLs. After argument
+parsing, `--help` and `--version` exit without reading a config file or resolving
+environment references. Without `--config`, existing CLI behavior is unchanged.
+
 ## What the report means
 
 | Field | Meaning |
@@ -112,6 +168,7 @@ Five samples make a quick check, not a statistically robust p95 benchmark.
 
 | Option | Default | Range / behavior |
 | --- | --- | --- |
+| `--config <file>` | None | Explicit JSON file, at most 64 KiB; incompatible with `--demo` |
 | `--samples <n>` | 5 | 1–100 samples per endpoint |
 | `--timeout <ms>` | 5000 | 1–60000 ms per complete request, including body |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |

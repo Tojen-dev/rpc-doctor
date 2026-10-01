@@ -10,7 +10,7 @@
   "keywords": ["ethereum", "evm", "rpc", "json-rpc", "benchmark", "cli"],
   "engines": { "node": ">=22" },
   "bin": { "rpc-doctor": "bin/rpc-doctor.js" },
-  "files": ["bin", "src", "README.md", "LICENSE"],
+  "files": ["bin", "src", "examples", "README.md", "LICENSE"],
   "scripts": {
     "start": "node bin/rpc-doctor.js",
     "test": "node --test test/*.test.js",

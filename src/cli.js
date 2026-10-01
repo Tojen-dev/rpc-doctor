@@ -3,15 +3,18 @@ import { readFile } from 'node:fs/promises';
 import { benchmark } from './benchmark.js';
 import { runDemo } from './demo.js';
 import { formatTable } from './format.js';
+import { ConfigError, loadConfig } from './config.js';
 
 const help = `RPC Doctor — compare EVM JSON-RPC endpoints
 
 Usage:
   rpc-doctor [options] <url> [url ...]
+  rpc-doctor --config <file> [options]
   rpc-doctor --demo
   RPC_DOCTOR_ENDPOINTS_JSON='["https://your-rpc.example"]' rpc-doctor
 
 Options:
+  --config <file>     Read an explicit JSON config (at most 64 KiB; no auto-search)
   --samples <n>       Block-number samples per endpoint, 1–100 (default: 5)
   --timeout <ms>      Timeout per request, 1–60000 (default: 5000)
   --label <name>      Repeat once per endpoint, in input order (default: RPC N)
@@ -25,6 +28,12 @@ Use environment input for API-key URLs to avoid storing them in shell history.
 Labels also name environment URLs; with --demo, supply three labels or none.
 Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
 Control characters become spaces; whitespace is collapsed and trimmed.
+URLs: positional > config endpoints > RPC_DOCTOR_ENDPOINTS_JSON.
+Samples/timeout: CLI > config > defaults. --label replaces all selected labels;
+config labels apply only to config URLs, otherwise the default is RPC N.
+Config fields: endpoints [{label, url OR urlEnv}], samples, timeout (ms).
+Unknown fields and missing/empty environment references are errors, even if overridden.
+--demo cannot be combined with --config. Help/version do not read config files.
 Exit codes: 0 = completed; 1 = all endpoints failed; 2 = invalid usage/runtime error.
 `;
 
@@ -33,7 +42,7 @@ export async function main(args, env, stdout, stderr) {
     let parsed;
     try {
       parsed = parseArgs({ args, allowPositionals: true, strict: true, options: {
-        samples: { type: 'string', default: '5' }, timeout: { type: 'string', default: '5000' },
+        config: { type: 'string' }, samples: { type: 'string' }, timeout: { type: 'string' },
         label: { type: 'string', multiple: true },
         json: { type: 'boolean' }, demo: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
@@ -46,12 +55,22 @@ export async function main(args, env, stdout, stderr) {
       stdout.write(`${pkg.version}\n`);
       return 0;
     }
-    if (!/^\d+$/.test(values.samples) || !/^\d+$/.test(values.timeout)) {
+    if ([values.samples, values.timeout].some((value) => value !== undefined && !/^\d+$/.test(value))) {
       throw new Error('Samples and timeout must be positive integers.');
     }
-    const options = { samples: Number(values.samples), timeoutMs: Number(values.timeout), labels: values.label };
     let endpoints = positionals;
     if (values.demo && endpoints.length) throw new Error('Use --demo without endpoint URLs.');
+    if (values.demo && values.config !== undefined) throw new Error('Use --demo without --config.');
+    const config = values.config === undefined ? {} : await loadConfig(values.config, env);
+    const options = {
+      samples: values.samples === undefined ? config.samples ?? 5 : Number(values.samples),
+      timeoutMs: values.timeout === undefined ? config.timeoutMs ?? 5000 : Number(values.timeout),
+      labels: values.label,
+    };
+    if (endpoints.length === 0 && config.endpoints !== undefined) {
+      endpoints = config.endpoints;
+      options.labels ??= config.labels;
+    }
     if (!values.demo && endpoints.length === 0 && env.RPC_DOCTOR_ENDPOINTS_JSON) {
       try { endpoints = JSON.parse(env.RPC_DOCTOR_ENDPOINTS_JSON); }
       catch { throw new Error('RPC_DOCTOR_ENDPOINTS_JSON must contain a JSON array of endpoint URLs.'); }
@@ -66,7 +85,7 @@ export async function main(args, env, stdout, stderr) {
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
     const expected = /^(Use |Provide |Samples |Timeout |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
-    stderr.write(`RPC Doctor: ${expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
+    stderr.write(`RPC Doctor: ${error instanceof ConfigError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }
 }

@@ -1,0 +1,8 @@
+{
+  "endpoints": [
+    { "label": "Primary node", "urlEnv": "PRIMARY_RPC_URL" },
+    { "label": "Local node", "url": "http://127.0.0.1:8545" }
+  ],
+  "samples": 10,
+  "timeout": 3000
+}
