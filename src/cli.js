@@ -18,6 +18,8 @@ Options:
   --samples <n>       Block-number samples per endpoint, 1–100 (default: 5)
   --timeout <ms>      Timeout per request, 1–60000 (default: 5000)
   --concurrency <n>   Maximum simultaneous RPC requests, 1–20 (default: 4)
+  --lag-threshold <n> Allowed lag in blocks, 0–9007199254740991 (default: 3)
+  --reference <n>     Reference endpoint index, starting at 1 in the selected list
   --label <name>      Repeat once per endpoint, in input order (default: RPC N)
   --json             Write a versioned JSON report
   --demo             Compare three synthetic local endpoints
@@ -31,9 +33,12 @@ Labels also name environment URLs; with --demo, supply three labels or none.
 Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
 Control characters become spaces; whitespace is collapsed and trimmed.
 URLs: positional > config endpoints > RPC_DOCTOR_ENDPOINTS_JSON.
-Samples/timeout/concurrency: CLI > config > defaults. --label replaces all selected labels;
+Settings: CLI > config > defaults. --label replaces all selected labels;
 config labels apply only to config URLs, otherwise the default is RPC N.
-Config fields: endpoints [{label, url OR urlEnv}], samples, timeout (ms), concurrency.
+Config fields: endpoints [{label, url OR urlEnv}], samples, timeout (ms), concurrency,
+lagThreshold, reference. Without a reference, lag uses the same-chain peer maximum.
+An unavailable or different-chain reference leaves lag unknown, with no fallback.
+The reference itself is not freshness-checked; endpoints ahead of it have lag 0.
 Unknown fields and missing/empty environment references are errors, even if overridden.
 --demo cannot be combined with --config. Help/version do not read config files.
 Exit codes: 0 = completed; 1 = all endpoints failed; 2 = invalid usage/runtime error.
@@ -46,6 +51,7 @@ export async function main(args, env, stdout, stderr) {
       parsed = parseArgs({ args, allowPositionals: true, strict: true, options: {
         config: { type: 'string' }, samples: { type: 'string' }, timeout: { type: 'string' },
         concurrency: { type: 'string' },
+        'lag-threshold': { type: 'string' }, reference: { type: 'string' },
         label: { type: 'string', multiple: true },
         json: { type: 'boolean' }, demo: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
@@ -64,6 +70,12 @@ export async function main(args, env, stdout, stderr) {
     if (values.concurrency !== undefined && (values.concurrency.length === 0 || /\D/.test(values.concurrency))) {
       throw new Error('Concurrency must be an integer from 1 to 20.');
     }
+    if (values['lag-threshold'] !== undefined && (values['lag-threshold'].length === 0 || /\D/.test(values['lag-threshold']))) {
+      throw new Error('Lag threshold must be an integer from 0 to 9007199254740991.');
+    }
+    if (values.reference !== undefined && (values.reference.length === 0 || /\D/.test(values.reference))) {
+      throw new Error('Reference must be an endpoint index from 1 to the selected endpoint count.');
+    }
     let endpoints = positionals;
     if (values.demo && endpoints.length) throw new Error('Use --demo without endpoint URLs.');
     if (values.demo && values.config !== undefined) throw new Error('Use --demo without --config.');
@@ -72,6 +84,8 @@ export async function main(args, env, stdout, stderr) {
       samples: values.samples === undefined ? config.samples ?? 5 : Number(values.samples),
       timeoutMs: values.timeout === undefined ? config.timeoutMs ?? 5000 : Number(values.timeout),
       concurrency: values.concurrency === undefined ? config.concurrency ?? 4 : Number(values.concurrency),
+      lagThreshold: values['lag-threshold'] === undefined ? config.lagThreshold ?? 3 : Number(values['lag-threshold']),
+      reference: values.reference === undefined ? config.reference : Number(values.reference),
       labels: values.label,
     };
     if (endpoints.length === 0 && config.endpoints !== undefined) {
@@ -86,12 +100,17 @@ export async function main(args, env, stdout, stderr) {
       stderr.write(help);
       return 2;
     }
+    // Config indices, like CLI indices, always refer to the selected URL list.
+    // Validate explicit config even when its reference is overridden by the CLI.
+    if (config.reference !== undefined && Array.isArray(endpoints) && config.reference > endpoints.length) {
+      throw new ConfigError('Config reference exceeds the selected endpoint count.');
+    }
     const report = values.demo ? await runDemo(options) : await benchmark(endpoints, options);
     stdout.write((values.json ? JSON.stringify(report, null, 2) : formatTable(report)) + '\n');
     return report.results.every((result) => result.status === 'unreachable') ? 1 : 0;
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
-    const expected = /^(Use |Provide |Samples |Timeout |Concurrency |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
+    const expected = /^(Use |Provide |Samples |Timeout |Concurrency |Lag threshold |Reference |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
     stderr.write(`RPC Doctor: ${error instanceof ConfigError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }

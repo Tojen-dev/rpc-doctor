@@ -100,7 +100,8 @@ relative to the current working directory. Start with
   ],
   "samples": 10,
   "timeout": 3000,
-  "concurrency": 4
+  "concurrency": 4,
+  "lagThreshold": 3
 }
 ```
 
@@ -118,13 +119,15 @@ the environment, not the file. Labels follow the same sanitization rules as
 in config error messages.
 
 The file must be a regular file of at most 64 KiB. Only `endpoints`, `samples`,
-`timeout`, and `concurrency` are allowed at the top level; all are optional. A
-settings-only file such as `{"samples": 10}` works with CLI or environment URLs. If present, `endpoints`
+`timeout`, `concurrency`, `lagThreshold`, and `reference` are allowed at the top
+level; all are optional. A settings-only file such as `{"samples": 10}` works with
+CLI or environment URLs. If present, `endpoints`
 must contain 1–20 entries with distinct HTTP(S) URLs. Unknown fields at either
 level, wrong types, userinfo/fragments, and missing environment references are
 errors. `samples` must be an integer from 1 to 100; `timeout` is an integer from
-1 to 60000 milliseconds; `concurrency` is an integer from 1 to 20. JSON strings are
-not accepted as numeric settings.
+1 to 60000 milliseconds; `concurrency` is an integer from 1 to 20. `lagThreshold`
+is an integer from 0 to 9007199254740991; `reference` is an integer index from 1 to
+the selected endpoint count. JSON strings are not accepted as numeric settings.
 
 | Input | Priority, highest first |
 | --- | --- |
@@ -132,6 +135,8 @@ not accepted as numeric settings.
 | Endpoint names | Explicit `--label` list → selected config endpoint labels → `RPC N` |
 | Samples / timeout | Explicit CLI option → config value → 5 / 5000 ms |
 | Concurrency | Explicit `--concurrency` → config `concurrency` → 4 |
+| Lag threshold | Explicit `--lag-threshold` → config `lagThreshold` → 3 blocks |
+| Reference | Explicit `--reference` → config `reference` → same-chain peer maximum |
 
 Endpoint lists are replaced as a whole, never merged. Config names are discarded
 when positional URLs replace config endpoints; they never label environment URLs.
@@ -139,6 +144,11 @@ Explicit `--label` values rename the entire selected list and must match its cou
 An unused `RPC_DOCTOR_ENDPOINTS_JSON` is ignored. An explicitly supplied config is
 always fully validated, including environment references and overridden settings,
 before any RPC request. CLI overrides do not hide config errors.
+
+Reference indices always address the **selected** URL list, including when
+positional URLs replace config endpoints. The config reference must also fit that
+list even when `--reference` overrides it. To return to peer-maximum mode, omit
+`--reference` and remove `reference` from the config.
 
 `--demo` rejects `--config` and still ignores environment URLs. After argument
 parsing, `--help` and `--version` exit without reading a config file or resolving
@@ -153,8 +163,8 @@ environment references. Without `--config`, existing CLI behavior is unchanged.
 | Median | Median latency of successful block-number calls |
 | p95 | Nearest-rank 95th percentile of successful calls |
 | Block | Highest block observed during the run, stored without integer precision loss |
-| Lag | Difference from the highest observed same-chain peer; unknown for a lone endpoint |
-| Status | Healthy when all samples pass and observed lag is at most 3 blocks; degraded on partial failure or larger lag; unreachable when no usable samples exist |
+| Lag | Non-negative block difference from the same-chain peer maximum, or the explicit reference; unknown when comparison is unavailable |
+| Status | Healthy when all samples pass and lag is within the threshold (default 3); degraded on partial failure, larger lag, or an unavailable/different-chain explicit reference; unreachable when no usable samples exist |
 
 Failed calls do not enter latency statistics. Their counts and categories remain
 visible in the report. A failed chain handshake produces zero block samples.
@@ -180,6 +190,47 @@ extra requests. The table summary and existing JSON `settings.concurrency` field
 report the effective worker count: the smaller of the selected limit and endpoint
 count. `schemaVersion` remains `1`.
 
+## Lag policy
+
+`--lag-threshold <n>` sets the maximum allowed lag, including the exact boundary.
+Zero requires a peer to be at least as high as the comparison baseline. The value
+must be a non-negative safe integer (at most 9007199254740991). Block heights and
+differences are calculated with `BigInt`, including heights above that limit.
+
+Without `--reference`, the baseline remains the highest successful block observed
+among available same-chain endpoints. A lone endpoint has unknown lag; successful
+requests can still be `healthy`, which does not establish freshness.
+
+Use `--reference <n>` to select one endpoint by its **1-based input index**, not its
+label or completion order. For example:
+
+```sh
+node bin/rpc-doctor.js --demo --reference 1 --lag-threshold 6 --json
+```
+
+The reference is usable when its chain handshake and at least one block sample
+succeed. Its highest successful block is the baseline even after partial sample
+failures; those failures and its `degraded` status remain visible. A successful
+sample does not establish that the reference is current or trustworthy.
+
+| Explicit-reference case | Lag / JSON `lagStatus` | Result status |
+| --- | --- | --- |
+| Same-chain peer at or below reference | Exact difference / `compared` | Degraded only if above threshold or samples failed |
+| Peer above reference | `0` / `ahead` | Request failures still determine degradation |
+| Reference itself, including a one-endpoint run | Unknown / `reference` | Based on request success only; freshness unverified |
+| Reference has no usable chain/block | Unknown / `reference_unavailable` for usable peers | Peers remain usable but degraded; no fallback to another endpoint |
+| Peer belongs to another chain | Unknown / `different_chain` | Degraded; never compare across networks or fall back to that chain's peers |
+| Endpoint has no usable chain/block | Unknown / `no_data` | Unreachable, with its own errors retained |
+
+Unknown lag is JSON `null` and table `—`. Reference mode adds a table `Lag check`
+column, JSON `settings.reference`, and per-result `lagStatus`; these fields are
+absent without an explicit reference. `peerCount` still counts other usable
+same-chain endpoints, regardless of the chosen baseline. Successful samples,
+latencies, labels, and input order are preserved even when lag cannot be checked.
+Exit codes are unchanged: a completed run with usable but degraded endpoints
+still exits `0`; `1` means all endpoints failed. The settings report the selected
+threshold; reports never include endpoint URLs.
+
 ## Options and exit codes
 
 | Option | Default | Range / behavior |
@@ -188,6 +239,8 @@ count. `schemaVersion` remains `1`.
 | `--samples <n>` | 5 | 1–100 samples per endpoint |
 | `--timeout <ms>` | 5000 | 1–60000 ms per complete request, including body |
 | `--concurrency <n>` | 4 | 1–20 simultaneous RPC requests; CLI overrides config; works with `--demo` |
+| `--lag-threshold <n>` | 3 | Maximum allowed lag; integer from 0 to 9007199254740991 |
+| `--reference <n>` | Peer maximum | 1-based index in selected URL list; same-chain comparisons only, no fallback |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--json` | Off | JSON only on stdout; `schemaVersion: 1` |
 | `--demo` | Off | Synthetic local endpoints; ignores environment URLs |

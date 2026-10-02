@@ -163,6 +163,57 @@ test('CLI concurrency cannot hide invalid config concurrency and failures keep e
   assert.equal(requests, 1);
 });
 
+test('lag policy uses CLI over config over defaults with indices in the selected list', async (t) => {
+  const { path } = await fixture(t);
+  const first = await serve((req, res) => reply(res, req.method === 'eth_chainId' ? '0x1' : '0x10'));
+  t.after(first.close);
+  const second = await serve((req, res) => reply(res, req.method === 'eth_chainId' ? '0x1' : '0x13'));
+  t.after(second.close);
+  const env = { RPC_DOCTOR_ENDPOINTS_JSON: JSON.stringify([first.url, second.url]) };
+  for (const [config, flags, threshold, reference, lags, statuses] of [
+    [{}, [], 3, undefined, ['3', '0'], ['healthy', 'healthy']],
+    [{ lagThreshold: 0 }, [], 0, undefined, ['3', '0'], ['degraded', 'healthy']],
+    [{ lagThreshold: 0, reference: 2 }, [], 0, 2, ['3', null], ['degraded', 'healthy']],
+    [{ lagThreshold: 0, reference: 2 }, ['--lag-threshold', '3'], 3, 2, ['3', null], ['healthy', 'healthy']],
+    [{ lagThreshold: 3, reference: 2 }, ['--reference', '1', '--lag-threshold', '0'], 0, 1, [null, '0'], ['healthy', 'healthy']],
+  ]) {
+    await writeFile(path, JSON.stringify(config));
+    const result = await run(['--config', path, '--samples', '1', '--json', ...flags], env);
+    assert.equal(result.code, 0, result.err);
+    const report = JSON.parse(result.out);
+    assert.equal(report.settings.lagThreshold, threshold);
+    assert.equal(report.settings.reference, reference);
+    assert.deepEqual(report.results.map((r) => r.lagBlocks), lags);
+    assert.deepEqual(report.results.map((r) => r.status), statuses);
+  }
+  await writeFile(path, JSON.stringify({ endpoints: [{ label: 'Unused config name', url: second.url }], reference: 2 }));
+  const positional = await run(['--config', path, '--samples', '1', '--json', first.url, second.url]);
+  assert.equal(positional.code, 0, positional.err);
+  const report = JSON.parse(positional.out);
+  assert.equal(report.settings.reference, 2);
+  assert.deepEqual(report.results.map((r) => [r.endpoint, r.lagBlocks]), [['RPC 1', '3'], ['RPC 2', null]]);
+});
+
+test('invalid config lag policy remains an error when overridden, before RPC', async (t) => {
+  const { path } = await fixture(t);
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const config of [
+    { lagThreshold: null }, { lagThreshold: 'SYNTHETIC_SECRET' }, { lagThreshold: -1 },
+    { lagThreshold: Number.MAX_SAFE_INTEGER + 1 }, { reference: null }, { reference: 'SYNTHETIC_SECRET' },
+    { reference: 0 }, { reference: 2 }, { reference: 21 },
+  ]) {
+    await writeFile(path, JSON.stringify(config));
+    const result = await run(['--config', path, '--lag-threshold', '0', '--reference', '1', server.url]);
+    assert.equal(result.code, 2);
+    assert.equal(result.out, '');
+    assert.match(result.err, /^RPC Doctor: Config (lagThreshold |reference )/);
+    for (const secret of [path, server.url, 'SYNTHETIC_SECRET']) assert.equal(result.err.includes(secret), false);
+  }
+  assert.equal(requests, 0);
+});
+
 test('explicit config is fully validated even when overridden, before any request, without leaking input', async (t) => {
   const { directory, path } = await fixture(t);
   let requests = 0;

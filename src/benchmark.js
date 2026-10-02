@@ -50,9 +50,12 @@ async function probe(url, label, samples, timeoutMs) {
   return result;
 }
 
-export function addPeerComparison(results) {
+export function addPeerComparison(results, { lagThreshold = 3, reference } = {}) {
+  const threshold = BigInt(lagThreshold);
   const groups = new Map();
   for (const result of results) {
+    result.lagBlocks = null;
+    result.peerCount = 0;
     if (result.chainId === null || result.latestBlock === null) continue;
     const group = groups.get(result.chainId) ?? [];
     group.push(result);
@@ -62,17 +65,38 @@ export function addPeerComparison(results) {
     const tip = group.reduce((max, item) => BigInt(item.latestBlock) > max ? BigInt(item.latestBlock) : max, 0n);
     for (const result of group) {
       result.peerCount = group.length - 1;
-      if (group.length > 1) {
+      if (reference === undefined && group.length > 1) {
         const lag = tip - BigInt(result.latestBlock);
         result.lagBlocks = lag.toString();
-        if (lag > 3n && result.status === 'healthy') result.status = 'degraded';
+        if (lag > threshold && result.status === 'healthy') result.status = 'degraded';
+      }
+    }
+  }
+  if (reference !== undefined) {
+    const baseline = results[reference - 1];
+    const usable = (result) => result.chainId !== null && result.latestBlock !== null;
+    for (const result of results) {
+      if (!usable(result)) result.lagStatus = 'no_data';
+      else if (result === baseline) result.lagStatus = 'reference';
+      else if (!usable(baseline)) result.lagStatus = 'reference_unavailable';
+      else if (result.chainId !== baseline.chainId) result.lagStatus = 'different_chain';
+      else {
+        const delta = BigInt(baseline.latestBlock) - BigInt(result.latestBlock);
+        result.lagBlocks = (delta < 0n ? 0n : delta).toString();
+        result.lagStatus = delta < 0n ? 'ahead' : 'compared';
+        if (delta > threshold && result.status === 'healthy') result.status = 'degraded';
+      }
+      if (['reference_unavailable', 'different_chain'].includes(result.lagStatus) && result.status === 'healthy') {
+        result.status = 'degraded';
       }
     }
   }
   return results;
 }
 
-export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000, concurrency = 4, labels } = {}) {
+export async function benchmark(endpoints, {
+  samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference,
+} = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
   }
@@ -84,6 +108,12 @@ export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000, conc
   }
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 20) {
     throw new Error('Concurrency must be an integer from 1 to 20.');
+  }
+  if (!Number.isSafeInteger(lagThreshold) || lagThreshold < 0) {
+    throw new Error('Lag threshold must be an integer from 0 to 9007199254740991.');
+  }
+  if (reference !== undefined && (!Number.isInteger(reference) || reference < 1 || reference > endpoints.length)) {
+    throw new Error('Reference must be an endpoint index from 1 to the selected endpoint count.');
   }
   const names = endpointLabels(labels, endpoints.length);
   const urls = endpoints.map(validateEndpoint);
@@ -103,7 +133,7 @@ export async function benchmark(endpoints, { samples = 5, timeoutMs = 5000, conc
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     durationMs: Math.round(performance.now() - started),
-    settings: { samples, timeoutMs, concurrency: workerCount, lagThreshold: 3 },
-    results: addPeerComparison(results),
+    settings: { samples, timeoutMs, concurrency: workerCount, lagThreshold, ...(reference === undefined ? {} : { reference }) },
+    results: addPeerComparison(results, { lagThreshold, reference }),
   };
 }

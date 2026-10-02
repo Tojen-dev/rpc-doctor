@@ -5,5 +5,6 @@
   ],
   "samples": 10,
   "timeout": 3000,
-  "concurrency": 4
+  "concurrency": 4,
+  "lagThreshold": 3
 }

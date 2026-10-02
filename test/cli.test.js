@@ -16,6 +16,8 @@ test('help and version do not need network access', async () => {
   assert.equal(help.code, 0);
   assert.match(help.out, /--label <name>/);
   assert.match(help.out, /--concurrency <n>/);
+  assert.match(help.out, /--lag-threshold <n>/);
+  assert.match(help.out, /--reference <n>/);
   assert.equal((await run(['--version'])).out, '0.1.0\n');
   assert.equal((await run([])).code, 2);
 });
@@ -227,4 +229,74 @@ test('demo supports concurrency in table and JSON while preserving failures and 
   assert.equal(report.settings.concurrency, 3);
   assert.deepEqual(report.results.map((r) => r.endpoint), ['RPC 1', 'RPC 2', 'RPC 3']);
   assert.deepEqual(report.results[2].errors, { RATE_LIMITED: 1 });
+});
+
+test('CLI rejects invalid lag policies before RPC without disclosing values', async (t) => {
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const option of ['--lag-threshold', '--reference']) {
+    for (const value of ['', '-1', '1.5', '1e1', '0x2', ' 2', '2\n', 'NaN', 'Infinity', '9007199254740992', 'SYNTHETIC_SECRET\x1b']) {
+      const result = await run([option, value, `${server.url}/SYNTHETIC_SECRET`]);
+      assert.equal(result.code, 2);
+      assert.equal(result.out, '');
+      assert.match(result.err, /^RPC Doctor: (Lag threshold |Reference |Invalid arguments\.)/);
+      assert.equal(result.err.includes('SYNTHETIC_SECRET'), false);
+      assert.equal(result.err.includes(server.url), false);
+      assert.doesNotMatch(result.err.trimEnd(), /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+    }
+    assert.equal((await run([option])).code, 2);
+  }
+  for (const value of ['0', '2', '21']) assert.equal((await run(['--reference', value, server.url])).code, 2);
+  assert.equal(requests, 0);
+});
+
+test('demo applies lag threshold and reference policy in table/JSON', async () => {
+  const peer = await run(['--demo', '--samples', '1', '--lag-threshold', '6', '--json']);
+  assert.equal(peer.code, 0, peer.err);
+  const report = JSON.parse(peer.out);
+  assert.equal(report.settings.lagThreshold, 6);
+  assert.equal(Object.hasOwn(report.settings, 'reference'), false);
+  assert.equal(report.results[1].status, 'healthy');
+  assert.ok(report.results.every((r) => !Object.hasOwn(r, 'lagStatus')));
+  const table = await run(['--demo', '--samples', '1', '--reference', '2', '--lag-threshold', '0']);
+  assert.equal(table.code, 0, table.err);
+  assert.match(table.out, /Lag threshold: 0 blocks/);
+  assert.match(table.out, /Reference: endpoint 2 \(RPC 2\)/);
+  assert.match(table.out, /^RPC 1\s+1\s+healthy.*\s0\s+ahead of reference$/m);
+  assert.match(table.out, /^RPC 2\s+1\s+healthy.*\s—\s+reference \(unverified\)$/m);
+  const reference = await run(['--demo', '--samples', '1', '--reference', '1', '--lag-threshold', '0', '--json']);
+  assert.equal(reference.code, 0, reference.err);
+  const selected = JSON.parse(reference.out);
+  assert.equal(selected.settings.reference, 1);
+  assert.equal(selected.results[1].lagBlocks, '6');
+  assert.equal(selected.results[1].status, 'degraded');
+});
+
+test('unavailable reference leaves successful results usable with explicit table/JSON reasons', async (t) => {
+  const failed = await serve((req, res) => res.writeHead(503).end('SYNTHETIC_SECRET'));
+  t.after(failed.close);
+  const good = await serve((req, res) => reply(res, '0x1'));
+  t.after(good.close);
+  for (const format of [[], ['--json']]) {
+    const result = await run(['--reference', '1', '--samples', '1', ...format,
+      '--label', 'Reference node', '--label', 'Successful node', `${failed.url}/SYNTHETIC_SECRET`, good.url]);
+    assert.equal(result.code, 0, result.err);
+    assert.equal(result.err, '');
+    assert.equal(result.out.includes('SYNTHETIC_SECRET'), false);
+    assert.equal(result.out.includes(failed.url), false);
+    assert.equal(result.out.includes(good.url), false);
+    if (format.length) {
+      const [, row] = JSON.parse(result.out).results;
+      assert.equal(row.endpoint, 'Successful node');
+      assert.equal(row.status, 'degraded');
+      assert.equal(row.lagBlocks, null);
+      assert.equal(row.lagStatus, 'reference_unavailable');
+      assert.equal(row.successes, 1);
+    } else {
+      assert.match(result.out, /^Successful node\s+1\s+degraded\s+1\/1.*reference unavailable$/m);
+      assert.match(result.out, /No fallback/);
+    }
+  }
+  assert.equal((await run(['--reference', '1', failed.url])).code, 1);
 });

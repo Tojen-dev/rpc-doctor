@@ -41,8 +41,8 @@ function hasOnlyKeys(value, keys) {
 
 export async function loadConfig(path, env) {
   const config = await readConfig(path);
-  if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout', 'concurrency'])) {
-    throw new ConfigError('Config must be an object containing only endpoints, samples, timeout, and concurrency.');
+  if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout', 'concurrency', 'lagThreshold', 'reference'])) {
+    throw new ConfigError('Config must be an object containing only endpoints, samples, timeout, concurrency, lagThreshold, and reference.');
   }
   const result = {};
   if (Object.hasOwn(config, 'samples')) {
@@ -62,6 +62,18 @@ export async function loadConfig(path, env) {
       throw new ConfigError('Config concurrency must be an integer from 1 to 20.');
     }
     result.concurrency = config.concurrency;
+  }
+  if (Object.hasOwn(config, 'lagThreshold')) {
+    if (!Number.isSafeInteger(config.lagThreshold) || config.lagThreshold < 0) {
+      throw new ConfigError('Config lagThreshold must be an integer from 0 to 9007199254740991.');
+    }
+    result.lagThreshold = config.lagThreshold;
+  }
+  if (Object.hasOwn(config, 'reference')) {
+    if (!Number.isInteger(config.reference) || config.reference < 1 || config.reference > 20) {
+      throw new ConfigError('Config reference must be an endpoint index from 1 to 20.');
+    }
+    result.reference = config.reference;
   }
   if (Object.hasOwn(config, 'endpoints')) {
     if (!Array.isArray(config.endpoints) || config.endpoints.length < 1 || config.endpoints.length > 20) {
