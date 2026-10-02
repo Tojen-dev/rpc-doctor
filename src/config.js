@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { endpointLabels } from './labels.js';
 import { validateEndpoint } from './rpc.js';
+import { parseExpectedChain } from './network.js';
 
 const MAX_CONFIG_BYTES = 64 * 1024;
 
@@ -41,8 +42,8 @@ function hasOnlyKeys(value, keys) {
 
 export async function loadConfig(path, env) {
   const config = await readConfig(path);
-  if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout', 'concurrency', 'lagThreshold', 'reference'])) {
-    throw new ConfigError('Config must be an object containing only endpoints, samples, timeout, concurrency, lagThreshold, and reference.');
+  if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout', 'concurrency', 'lagThreshold', 'reference', 'expectedChain'])) {
+    throw new ConfigError('Config must be an object containing only endpoints, samples, timeout, concurrency, lagThreshold, reference, and expectedChain.');
   }
   const result = {};
   if (Object.hasOwn(config, 'samples')) {
@@ -74,6 +75,10 @@ export async function loadConfig(path, env) {
       throw new ConfigError('Config reference must be an endpoint index from 1 to 20.');
     }
     result.reference = config.reference;
+  }
+  if (Object.hasOwn(config, 'expectedChain')) {
+    try { result.expectedChain = parseExpectedChain(config.expectedChain).toString(); }
+    catch { throw new ConfigError('Config expectedChain must be a decimal or 0x-hex string from 0 to 2^256-1, without leading zeros.'); }
   }
   if (Object.hasOwn(config, 'endpoints')) {
     if (!Array.isArray(config.endpoints) || config.endpoints.length < 1 || config.endpoints.length > 20) {

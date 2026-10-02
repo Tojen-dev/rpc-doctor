@@ -214,6 +214,53 @@ test('invalid config lag policy remains an error when overridden, before RPC', a
   assert.equal(requests, 0);
 });
 
+test('expected chain uses CLI over config with exact large-ID normalization and an opt-in default', async (t) => {
+  const { path } = await fixture(t);
+  const observed = 9007199254740993n;
+  let blockCalls = 0;
+  const server = await serve((req, res) => {
+    if (req.method === 'eth_chainId') reply(res, `0x${observed.toString(16)}`);
+    else { blockCalls++; reply(res, '0x10'); }
+  });
+  t.after(server.close);
+  for (const [config, flags, expected, code] of [
+    [{}, [], undefined, 0],
+    [{ expectedChain: '0x20000000000001' }, [], observed.toString(), 0],
+    [{ expectedChain: '1' }, ['--expected-chain', observed.toString()], observed.toString(), 0],
+    [{ expectedChain: observed.toString() }, ['--expected-chain', '0x1'], '1', 1],
+  ]) {
+    await writeFile(path, JSON.stringify(config));
+    blockCalls = 0;
+    const result = await run(['--config', path, '--samples', '1', '--json', ...flags], {
+      RPC_DOCTOR_ENDPOINTS_JSON: JSON.stringify([server.url]),
+    });
+    assert.equal(result.code, code, result.err);
+    const report = JSON.parse(result.out);
+    assert.equal(report.settings.expectedChain, expected);
+    assert.equal(report.results[0].chainId, observed.toString());
+    assert.equal(blockCalls, code === 0 ? 1 : 0);
+    assert.equal(report.results[0].networkStatus, expected === undefined ? undefined : code === 0 ? 'match' : 'mismatch');
+  }
+});
+
+test('invalid explicit config expectedChain cannot be hidden by CLI overrides', async (t) => {
+  const { path } = await fixture(t);
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const expectedChain of [null, 1, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1, false,
+    [], {}, '01', '0x01', '1\n', (1n << 256n).toString(), 'SYNTHETIC_SECRET']) {
+    await writeFile(path, JSON.stringify({ expectedChain }));
+    const result = await run(['--config', path, '--expected-chain', '1', server.url]);
+    assert.equal(result.code, 2);
+    assert.equal(result.out, '');
+    assert.match(result.err, /^RPC Doctor: Config expectedChain must be/);
+    for (const secret of ['SYNTHETIC_SECRET', server.url, path]) assert.equal(result.err.includes(secret), false);
+    assert.doesNotMatch(result.err.trimEnd(), /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+  }
+  assert.equal(requests, 0);
+});
+
 test('explicit config is fully validated even when overridden, before any request, without leaking input', async (t) => {
   const { directory, path } = await fixture(t);
   let requests = 0;

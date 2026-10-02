@@ -18,12 +18,13 @@ test('loads named URLs and entire-URL environment references with safe labels an
       { label: '  Primary\n\x1b\u202e node ', urlEnv: 'PRIMARY_RPC_URL' },
       { label: 'Резервний вузол', url: 'http://127.0.0.1:8545' },
     ], samples: 100, timeout: 60000, concurrency: 20, lagThreshold: Number.MAX_SAFE_INTEGER, reference: 2,
+    expectedChain: '0x20000000000001',
   }));
   const result = await loadConfig(path, { PRIMARY_RPC_URL: 'https://rpc.example/SYNTHETIC_SECRET' });
   assert.deepEqual(result, {
     endpoints: ['https://rpc.example/SYNTHETIC_SECRET', 'http://127.0.0.1:8545/'],
     labels: ['Primary node', 'Резервний вузол'], samples: 100, timeoutMs: 60000, concurrency: 20,
-    lagThreshold: Number.MAX_SAFE_INTEGER, reference: 2,
+    lagThreshold: Number.MAX_SAFE_INTEGER, reference: 2, expectedChain: '9007199254740993',
   });
   await writeFile(path, '{}');
   assert.deepEqual(await loadConfig(path, {}), {});
@@ -42,6 +43,8 @@ test('rejects invalid structures, types, unknown fields, URLs and labels with st
     ...[null, '1', false, 0, -1, 1.5, 21, [], {}].map((concurrency) => ({ concurrency })),
     ...[null, '3', false, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, [], {}].map((lagThreshold) => ({ lagThreshold })),
     ...[null, '1', false, 0, -1, 1.5, 21, [], {}].map((reference) => ({ reference })),
+    ...[null, 0, 1, Number.MAX_SAFE_INTEGER + 1, false, [], {}, '', '01', '0X1', '0x01', '1\n',
+      (1n << 256n).toString(), '9'.repeat(1000)].map((expectedChain) => ({ expectedChain })),
     ...[null, {}, [], 'SYNTHETIC_SECRET'].map((endpoints) => ({ endpoints })),
     { endpoints: Array.from({ length: 21 }, (_, i) => ({ label: `Node ${i}`, url: `https://rpc.example/${i}` })) },
     ...[null, [], 'SYNTHETIC_SECRET', {}, { url: endpoint.url }, { label: 'Primary' },

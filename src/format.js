@@ -1,14 +1,16 @@
 export function formatTable(report) {
   const reference = report.settings.reference;
+  const guarded = report.settings.expectedChain !== undefined;
   const lagChecks = {
     reference: 'reference (unverified)', compared: 'compared', ahead: 'ahead of reference',
     reference_unavailable: 'reference unavailable', different_chain: 'different chain', no_data: 'no block data',
+    reference_mismatch: 'reference wrong chain', network_mismatch: 'wrong chain',
   };
-  const headers = ['Endpoint', 'Chain', 'Status', 'OK', 'Median', 'p95', 'Block', 'Lag'];
+  const headers = ['Endpoint', 'Chain', ...(guarded ? ['Network'] : []), 'Status', 'OK', 'Median', 'p95', 'Block', 'Lag'];
   if (reference !== undefined) headers.push('Lag check');
   const ms = (value) => value === null ? '—' : `${value.toFixed(1)}ms`;
   const rows = report.results.map((r) => [
-    r.endpoint, r.chainId ?? '—', r.status, `${r.successes}/${r.attempts}`,
+    r.endpoint, r.chainId ?? '—', ...(guarded ? [r.networkStatus] : []), r.status, `${r.successes}/${r.attempts}`,
     ms(r.latencyMs.median), ms(r.latencyMs.p95), r.latestBlock ?? '—', r.lagBlocks ?? '—',
     ...(reference === undefined ? [] : [lagChecks[r.lagStatus] ?? '—']),
   ]);
@@ -20,6 +22,7 @@ export function formatTable(report) {
     line(headers), line(widths.map((w) => '─'.repeat(w))), ...rows.map(line), '',
     `Samples: ${report.settings.samples} · Timeout: ${report.settings.timeoutMs}ms · Concurrency: ${report.settings.concurrency} · Elapsed: ${report.durationMs}ms`,
     `Lag threshold: ${report.settings.lagThreshold} blocks.`,
+    ...(guarded ? [`Expected chain: ${report.settings.expectedChain}. Mismatched endpoints receive no block samples.`] : []),
     ...(reference === undefined
       ? ['Lag is relative to observed same-chain peers; — means no comparison is available.']
       : [`Reference: endpoint ${reference} (${report.results[reference - 1].endpoint}).`,

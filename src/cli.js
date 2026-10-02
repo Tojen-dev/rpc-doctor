@@ -20,6 +20,7 @@ Options:
   --concurrency <n>   Maximum simultaneous RPC requests, 1–20 (default: 4)
   --lag-threshold <n> Allowed lag in blocks, 0–9007199254740991 (default: 3)
   --reference <n>     Reference endpoint index, starting at 1 in the selected list
+  --expected-chain <id> Require a decimal or 0x-hex chain ID (optional)
   --label <name>      Repeat once per endpoint, in input order (default: RPC N)
   --json             Write a versioned JSON report
   --demo             Compare three synthetic local endpoints
@@ -36,12 +37,16 @@ URLs: positional > config endpoints > RPC_DOCTOR_ENDPOINTS_JSON.
 Settings: CLI > config > defaults. --label replaces all selected labels;
 config labels apply only to config URLs, otherwise the default is RPC N.
 Config fields: endpoints [{label, url OR urlEnv}], samples, timeout (ms), concurrency,
-lagThreshold, reference. Without a reference, lag uses the same-chain peer maximum.
+lagThreshold, reference, expectedChain. Config expectedChain must be a string.
+Expected chain range: 0–2^256-1; no leading zeros, signs, or whitespace.
+Mismatched endpoints keep their observed ID but receive no block samples.
+Without a reference, lag uses the same-chain peer maximum.
 An unavailable or different-chain reference leaves lag unknown, with no fallback.
 The reference itself is not freshness-checked; endpoints ahead of it have lag 0.
 Unknown fields and missing/empty environment references are errors, even if overridden.
 --demo cannot be combined with --config. Help/version do not read config files.
-Exit codes: 0 = completed; 1 = all endpoints failed; 2 = invalid usage/runtime error.
+Exit codes: 0 = at least one usable endpoint; 1 = none usable; 2 = invalid usage/runtime error.
+With expected-chain, only successful block samples on that chain count as usable.
 `;
 
 export async function main(args, env, stdout, stderr) {
@@ -52,6 +57,7 @@ export async function main(args, env, stdout, stderr) {
         config: { type: 'string' }, samples: { type: 'string' }, timeout: { type: 'string' },
         concurrency: { type: 'string' },
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
+        'expected-chain': { type: 'string' },
         label: { type: 'string', multiple: true },
         json: { type: 'boolean' }, demo: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
@@ -86,6 +92,7 @@ export async function main(args, env, stdout, stderr) {
       concurrency: values.concurrency === undefined ? config.concurrency ?? 4 : Number(values.concurrency),
       lagThreshold: values['lag-threshold'] === undefined ? config.lagThreshold ?? 3 : Number(values['lag-threshold']),
       reference: values.reference === undefined ? config.reference : Number(values.reference),
+      expectedChain: values['expected-chain'] === undefined ? config.expectedChain : values['expected-chain'],
       labels: values.label,
     };
     if (endpoints.length === 0 && config.endpoints !== undefined) {
@@ -107,10 +114,10 @@ export async function main(args, env, stdout, stderr) {
     }
     const report = values.demo ? await runDemo(options) : await benchmark(endpoints, options);
     stdout.write((values.json ? JSON.stringify(report, null, 2) : formatTable(report)) + '\n');
-    return report.results.every((result) => result.status === 'unreachable') ? 1 : 0;
+    return report.results.some((result) => result.successes > 0) ? 0 : 1;
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
-    const expected = /^(Use |Provide |Samples |Timeout |Concurrency |Lag threshold |Reference |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
+    const expected = /^(Use |Provide |Samples |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
     stderr.write(`RPC Doctor: ${error instanceof ConfigError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }

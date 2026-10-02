@@ -22,7 +22,7 @@ fix it first and record the reason; the exact commit count is a planning target.
 - [x] **07. Local configuration files.** Load named endpoints and settings from a validated JSON file; allow environment references for secrets; define precedence.
 - [x] **08. Configurable concurrency.** Expose a bounded worker count and prove request concurrency never exceeds it.
 - [x] **09. Configurable lag policy.** Support a lag threshold and explicit reference endpoint, with unavailable-reference behavior.
-- [ ] **10. Expected network guard.** Allow an expected chain ID and flag mismatches without comparing unrelated chains.
+- [x] **10. Expected network guard.** Allow an expected chain ID and flag mismatches without comparing unrelated chains.
 - [ ] **11. Explicit warm-up.** Add optional warm-up requests; separate their failures and overhead from measured samples.
 - [ ] **12. Sampling rounds.** Sample peers in rounds and record observation times to reduce sequential comparison bias.
 - [ ] **13. Inter-sample pacing.** Add a configurable minimum interval with elapsed-time accounting and deterministic timer tests.

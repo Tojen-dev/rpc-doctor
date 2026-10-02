@@ -119,15 +119,17 @@ the environment, not the file. Labels follow the same sanitization rules as
 in config error messages.
 
 The file must be a regular file of at most 64 KiB. Only `endpoints`, `samples`,
-`timeout`, `concurrency`, `lagThreshold`, and `reference` are allowed at the top
-level; all are optional. A settings-only file such as `{"samples": 10}` works with
+`timeout`, `concurrency`, `lagThreshold`, `reference`, and `expectedChain` are
+allowed at the top level; all are optional. A settings-only file such as `{"samples": 10}` works with
 CLI or environment URLs. If present, `endpoints`
 must contain 1–20 entries with distinct HTTP(S) URLs. Unknown fields at either
 level, wrong types, userinfo/fragments, and missing environment references are
 errors. `samples` must be an integer from 1 to 100; `timeout` is an integer from
 1 to 60000 milliseconds; `concurrency` is an integer from 1 to 20. `lagThreshold`
 is an integer from 0 to 9007199254740991; `reference` is an integer index from 1 to
-the selected endpoint count. JSON strings are not accepted as numeric settings.
+the selected endpoint count. Those settings require JSON numbers. `expectedChain`
+is a string identifier, using the decimal or hex format described below; JSON
+numbers are not accepted for chain IDs, even when they are small.
 
 | Input | Priority, highest first |
 | --- | --- |
@@ -137,6 +139,7 @@ the selected endpoint count. JSON strings are not accepted as numeric settings.
 | Concurrency | Explicit `--concurrency` → config `concurrency` → 4 |
 | Lag threshold | Explicit `--lag-threshold` → config `lagThreshold` → 3 blocks |
 | Reference | Explicit `--reference` → config `reference` → same-chain peer maximum |
+| Expected chain | Explicit `--expected-chain` → config `expectedChain` → no network guard |
 
 Endpoint lists are replaced as a whole, never merged. Config names are discarded
 when positional URLs replace config endpoints; they never label environment URLs.
@@ -164,7 +167,7 @@ environment references. Without `--config`, existing CLI behavior is unchanged.
 | p95 | Nearest-rank 95th percentile of successful calls |
 | Block | Highest block observed during the run, stored without integer precision loss |
 | Lag | Non-negative block difference from the same-chain peer maximum, or the explicit reference; unknown when comparison is unavailable |
-| Status | Healthy when all samples pass and lag is within the threshold (default 3); degraded on partial failure, larger lag, or an unavailable/different-chain explicit reference; unreachable when no usable samples exist |
+| Status | Healthy when samples pass and lag is within the threshold; degraded on partial failure, larger lag, or unusable reference; unreachable when probing fails; mismatch when the observed network is rejected by the optional guard |
 
 Failed calls do not enter latency statistics. Their counts and categories remain
 visible in the report. A failed chain handshake produces zero block samples.
@@ -219,6 +222,8 @@ sample does not establish that the reference is current or trustworthy.
 | Peer above reference | `0` / `ahead` | Request failures still determine degradation |
 | Reference itself, including a one-endpoint run | Unknown / `reference` | Based on request success only; freshness unverified |
 | Reference has no usable chain/block | Unknown / `reference_unavailable` for usable peers | Peers remain usable but degraded; no fallback to another endpoint |
+| Reference rejected by expected-chain guard | Unknown / `reference_mismatch` for usable peers | Peers remain usable but degraded; no replacement reference |
+| Endpoint rejected by expected-chain guard | Unknown / `network_mismatch` | Mismatch, with its observed chain ID retained and no block samples |
 | Peer belongs to another chain | Unknown / `different_chain` | Degraded; never compare across networks or fall back to that chain's peers |
 | Endpoint has no usable chain/block | Unknown / `no_data` | Unreachable, with its own errors retained |
 
@@ -227,9 +232,56 @@ column, JSON `settings.reference`, and per-result `lagStatus`; these fields are
 absent without an explicit reference. `peerCount` still counts other usable
 same-chain endpoints, regardless of the chosen baseline. Successful samples,
 latencies, labels, and input order are preserved even when lag cannot be checked.
-Exit codes are unchanged: a completed run with usable but degraded endpoints
-still exits `0`; `1` means all endpoints failed. The settings report the selected
-threshold; reports never include endpoint URLs.
+Exit codes still depend on usable results: a completed run with usable but degraded
+endpoints still exits `0`; `1` means no endpoints yielded usable block samples.
+The settings report the selected threshold; reports never include endpoint URLs.
+
+## Expected network
+
+Use `--expected-chain ID` to accept block samples only from a selected network.
+The equivalent config field is a **string**, for example `{"expectedChain":"0x1"}`.
+CLI takes precedence, but an invalid config value is still rejected before RPC.
+No guard is enabled unless this option or config field is present.
+
+The format is unsigned decimal (`0` or a nonzero digit followed by digits), or hex
+with the lowercase prefix `0x` (`0x0` or a nonzero hex digit followed by hex digits).
+Hex digits may be uppercase or lowercase. Leading zeros, whitespace, signs,
+fractions, and exponent notation are rejected. The range is **0 through 2^256−1**;
+input is limited to 78 characters. Parsing and comparison use `BigInt`, so
+`9007199254740993` and `0x20000000000001` represent the same exact ID. Both the
+observed `chainId` and `settings.expectedChain` are reported as decimal strings.
+
+```sh
+node bin/rpc-doctor.js --demo --expected-chain 0x1 --json
+```
+
+Only the existing `eth_chainId` handshake is used. A valid ID from another network
+is retained and produces `status: "mismatch"`, not a transport failure. That
+endpoint receives no `eth_blockNumber` calls: attempts/successes are zero, block
+and latency values are null, and no RPC error is invented. It contributes neither
+to peer counts nor to the lag baseline. Other endpoints continue normally under
+the same concurrency limit and keep their original labels and order.
+
+Guarded reports add a `Network` column and per-result `networkStatus`:
+
+| Network result | `networkStatus` | Behavior |
+| --- | --- | --- |
+| Handshake ID equals expected ID | `match` | Collect samples; ordinary healthy/degraded/unreachable rules apply |
+| Valid handshake ID differs | `mismatch` | Keep observed ID, mark mismatch, skip all block samples |
+| Failed or invalid handshake | `unknown` | Keep the sanitized failure; chain ID is null and status is unreachable |
+
+A matching handshake can still have failed block samples. Network mismatch is
+separate from RPC errors. If the chosen reference is rejected, it stays selected:
+matching peers keep their successful measurements but have unknown lag,
+`lagStatus: "reference_mismatch"`, and `degraded` status. If its handshake or all
+block samples fail instead, peers use `reference_unavailable`. There is no fallback.
+
+With the guard enabled, exit `0` means at least one endpoint on the expected chain
+returned a successful block sample, even if others mismatched or failed. Exit `1`
+means none did: all mismatches, all failures, or any mixture of those. This does
+not make a mismatch a network outage. Invalid arguments/config remain exit `2`.
+Without the guard, behavior and report fields remain unchanged; `expectedChain`,
+`networkStatus`, and the `Network` column are absent. `schemaVersion` remains `1`.
 
 ## Options and exit codes
 
@@ -241,6 +293,7 @@ threshold; reports never include endpoint URLs.
 | `--concurrency <n>` | 4 | 1–20 simultaneous RPC requests; CLI overrides config; works with `--demo` |
 | `--lag-threshold <n>` | 3 | Maximum allowed lag; integer from 0 to 9007199254740991 |
 | `--reference <n>` | Peer maximum | 1-based index in selected URL list; same-chain comparisons only, no fallback |
+| `--expected-chain <id>` | None | Decimal or `0x`-hex ID, 0–2^256−1; reject other networks before block samples |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--json` | Off | JSON only on stdout; `schemaVersion: 1` |
 | `--demo` | Off | Synthetic local endpoints; ignores environment URLs |
@@ -252,7 +305,8 @@ Response bodies are limited to 1 MiB. Each healthy endpoint receives one handsha
 plus the configured number of samples. Respect your provider's request allowance.
 
 Exit `0`: run completed with at least one usable endpoint (others may be degraded).
-Exit `1`: all endpoints failed. Exit `2`: invalid input or a runtime error.
+Exit `1`: no usable block samples (including mismatches when the guard is enabled).
+Exit `2`: invalid input or a runtime error.
 Exit `130`: interrupted with Ctrl+C.
 
 ## Development

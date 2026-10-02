@@ -1,5 +1,6 @@
 import { rpcCall, parseQuantity, validateEndpoint } from './rpc.js';
 import { endpointLabels } from './labels.js';
+import { parseExpectedChain } from './network.js';
 
 export function latencyStats(values) {
   if (values.length === 0) return { min: null, median: null, p95: null, max: null };
@@ -14,11 +15,12 @@ export function latencyStats(values) {
   };
 }
 
-async function probe(url, label, samples, timeoutMs) {
+async function probe(url, label, samples, timeoutMs, expectedChain) {
   const result = {
     endpoint: label, chainId: null, latestBlock: null,
     attempts: 0, successes: 0, errors: {}, latencyMs: latencyStats([]),
     successRate: 0, lagBlocks: null, peerCount: 0, status: 'unreachable',
+    ...(expectedChain === undefined ? {} : { networkStatus: 'unknown' }),
   };
   const recordError = (error) => {
     const code = error.code ?? 'UNKNOWN_ERROR';
@@ -26,7 +28,15 @@ async function probe(url, label, samples, timeoutMs) {
   };
   try {
     const { result: chainId } = await rpcCall(url, 'eth_chainId', [], { timeoutMs });
-    result.chainId = parseQuantity(chainId).toString();
+    const observed = parseQuantity(chainId);
+    result.chainId = observed.toString();
+    if (expectedChain !== undefined) {
+      result.networkStatus = observed === expectedChain ? 'match' : 'mismatch';
+      if (result.networkStatus === 'mismatch') {
+        result.status = 'mismatch';
+        return result;
+      }
+    }
   } catch (error) {
     recordError(error);
     return result;
@@ -56,7 +66,7 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
   for (const result of results) {
     result.lagBlocks = null;
     result.peerCount = 0;
-    if (result.chainId === null || result.latestBlock === null) continue;
+    if (result.status === 'mismatch' || result.chainId === null || result.latestBlock === null) continue;
     const group = groups.get(result.chainId) ?? [];
     group.push(result);
     groups.set(result.chainId, group);
@@ -76,8 +86,10 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
     const baseline = results[reference - 1];
     const usable = (result) => result.chainId !== null && result.latestBlock !== null;
     for (const result of results) {
-      if (!usable(result)) result.lagStatus = 'no_data';
+      if (result.status === 'mismatch') result.lagStatus = 'network_mismatch';
+      else if (!usable(result)) result.lagStatus = 'no_data';
       else if (result === baseline) result.lagStatus = 'reference';
+      else if (baseline.status === 'mismatch') result.lagStatus = 'reference_mismatch';
       else if (!usable(baseline)) result.lagStatus = 'reference_unavailable';
       else if (result.chainId !== baseline.chainId) result.lagStatus = 'different_chain';
       else {
@@ -86,7 +98,7 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
         result.lagStatus = delta < 0n ? 'ahead' : 'compared';
         if (delta > threshold && result.status === 'healthy') result.status = 'degraded';
       }
-      if (['reference_unavailable', 'different_chain'].includes(result.lagStatus) && result.status === 'healthy') {
+      if (['reference_unavailable', 'reference_mismatch', 'different_chain'].includes(result.lagStatus) && result.status === 'healthy') {
         result.status = 'degraded';
       }
     }
@@ -95,7 +107,7 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
 }
 
 export async function benchmark(endpoints, {
-  samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference,
+  samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference, expectedChain,
 } = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
@@ -115,6 +127,7 @@ export async function benchmark(endpoints, {
   if (reference !== undefined && (!Number.isInteger(reference) || reference < 1 || reference > endpoints.length)) {
     throw new Error('Reference must be an endpoint index from 1 to the selected endpoint count.');
   }
+  const expected = expectedChain === undefined ? undefined : parseExpectedChain(expectedChain);
   const names = endpointLabels(labels, endpoints.length);
   const urls = endpoints.map(validateEndpoint);
   if (new Set(urls).size !== urls.length) throw new Error('Duplicate endpoints are not allowed.');
@@ -125,7 +138,7 @@ export async function benchmark(endpoints, {
   async function worker() {
     while (next < urls.length) {
       const index = next++;
-      results[index] = await probe(urls[index], names[index], samples, timeoutMs);
+      results[index] = await probe(urls[index], names[index], samples, timeoutMs, expected);
     }
   }
   await Promise.all(Array.from({ length: workerCount }, worker));
@@ -133,7 +146,11 @@ export async function benchmark(endpoints, {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     durationMs: Math.round(performance.now() - started),
-    settings: { samples, timeoutMs, concurrency: workerCount, lagThreshold, ...(reference === undefined ? {} : { reference }) },
+    settings: {
+      samples, timeoutMs, concurrency: workerCount, lagThreshold,
+      ...(reference === undefined ? {} : { reference }),
+      ...(expected === undefined ? {} : { expectedChain: expected.toString() }),
+    },
     results: addPeerComparison(results, { lagThreshold, reference }),
   };
 }

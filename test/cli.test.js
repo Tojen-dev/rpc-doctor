@@ -18,6 +18,7 @@ test('help and version do not need network access', async () => {
   assert.match(help.out, /--concurrency <n>/);
   assert.match(help.out, /--lag-threshold <n>/);
   assert.match(help.out, /--reference <n>/);
+  assert.match(help.out, /--expected-chain <id>/);
   assert.equal((await run(['--version'])).out, '0.1.0\n');
   assert.equal((await run([])).code, 2);
 });
@@ -299,4 +300,84 @@ test('unavailable reference leaves successful results usable with explicit table
     }
   }
   assert.equal((await run(['--reference', '1', failed.url])).code, 1);
+});
+
+test('invalid expected-chain input is rejected safely before requests; help/version skip it', async (t) => {
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const value of ['', '-1', '+1', '1.5', '1e1', '01', '0x01', '0X1', '0x', '1\n',
+    (1n << 256n).toString(), '9'.repeat(1000), 'SYNTHETIC_SECRET\x1b']) {
+    const result = await run(['--expected-chain', value, `${server.url}/SYNTHETIC_SECRET`]);
+    assert.equal(result.code, 2);
+    assert.equal(result.out, '');
+    assert.match(result.err, /^RPC Doctor: (Expected chain |Invalid arguments\.)/);
+    for (const secret of ['SYNTHETIC_SECRET', server.url]) assert.equal(result.err.includes(secret), false);
+    assert.doesNotMatch(result.err.trimEnd(), /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+  }
+  assert.equal((await run(['--expected-chain'])).code, 2);
+  assert.equal((await run(['--expected-chain', 'invalid', '--help'])).code, 0);
+  assert.equal((await run(['--expected-chain', 'invalid', '--version'])).code, 0);
+  assert.equal(requests, 0);
+});
+
+test('demo shows matching networks in table and all mismatches in JSON with exit code 1', async () => {
+  const table = await run(['--demo', '--samples', '3', '--expected-chain', '0x1']);
+  assert.equal(table.code, 0, table.err);
+  assert.match(table.out, /Expected chain: 1/);
+  assert.match(table.out, /Network/);
+  assert.match(table.out, /^RPC 1\s+1\s+match\s+healthy\s+3\/3/m);
+  assert.match(table.out, /RATE_LIMITED/);
+  const json = await run(['--demo', '--expected-chain', '2', '--json']);
+  assert.equal(json.code, 1, json.err);
+  const report = JSON.parse(json.out);
+  assert.equal(report.demo, true);
+  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.settings.expectedChain, '2');
+  assert.deepEqual(report.results.map((r) => [r.endpoint, r.chainId, r.networkStatus, r.status, r.attempts, r.errors]), [
+    ['RPC 1', '1', 'mismatch', 'mismatch', 0, {}], ['RPC 2', '1', 'mismatch', 'mismatch', 0, {}],
+    ['RPC 3', '1', 'mismatch', 'mismatch', 0, {}],
+  ]);
+});
+
+test('mixed network results use successful matching samples for exit status and explain a rejected reference', async (t) => {
+  let mismatchedBlockCalls = 0;
+  let failMatchingBlocks = false;
+  const wrong = await serve((req, res) => {
+    if (req.method === 'eth_blockNumber') mismatchedBlockCalls++;
+    reply(res, '0x2');
+  });
+  t.after(wrong.close);
+  const right = await serve((req, res) => {
+    if (req.method === 'eth_chainId') reply(res, '0x1');
+    else if (failMatchingBlocks) res.writeHead(503).end('SYNTHETIC_SECRET');
+    else reply(res, '0x10');
+  });
+  t.after(right.close);
+  const args = ['--expected-chain', '1', '--reference', '1', '--samples', '1',
+    '--label', 'Wrong reference', '--label', 'Accepted peer', `${wrong.url}/SYNTHETIC_SECRET`, right.url];
+  for (const format of [[], ['--json']]) {
+    const result = await run([...args, ...format]);
+    assert.equal(result.code, 0, result.err);
+    for (const secret of ['SYNTHETIC_SECRET', wrong.url, right.url]) assert.equal(result.out.includes(secret), false);
+    if (format.length) {
+      const [reference, peer] = JSON.parse(result.out).results;
+      assert.equal(reference.status, 'mismatch');
+      assert.equal(reference.lagStatus, 'network_mismatch');
+      assert.equal(peer.status, 'degraded');
+      assert.equal(peer.lagStatus, 'reference_mismatch');
+      assert.equal(peer.successes, 1);
+    } else {
+      assert.match(result.out, /^Wrong reference\s+2\s+mismatch\s+mismatch\s+0\/0.*wrong chain$/m);
+      assert.match(result.out, /^Accepted peer\s+1\s+match\s+degraded\s+1\/1.*reference wrong chain$/m);
+    }
+  }
+  failMatchingBlocks = true;
+  const unusable = await run([...args, '--json']);
+  assert.equal(unusable.code, 1);
+  const [, peer] = JSON.parse(unusable.out).results;
+  assert.equal(peer.status, 'unreachable');
+  assert.equal(peer.networkStatus, 'match');
+  assert.deepEqual(peer.errors, { HTTP_ERROR: 1 });
+  assert.equal(mismatchedBlockCalls, 0);
 });
