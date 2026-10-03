@@ -21,6 +21,22 @@ test('rejects malformed quantities and preserves large integers', () => {
   }
 });
 
+test('matches a supplied request ID and rejects invalid IDs before sending', async (t) => {
+  let requests = 0;
+  const server = await serve((req, res) => {
+    requests++;
+    assert.equal(req.id, 42);
+    reply(res, '0x1', requests === 1 ? req.id : 1);
+  });
+  t.after(server.close);
+  assert.equal((await rpcCall(server.url, 'eth_chainId', [], { id: 42 })).result, '0x1');
+  await assert.rejects(rpcCall(server.url, 'eth_chainId', [], { id: 42 }), { code: 'INVALID_RESPONSE' });
+  for (const id of [0, -1, 1.5, null, '42', Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(rpcCall(server.url, 'eth_chainId', [], { id }), { code: 'INVALID_ID' });
+  }
+  assert.equal(requests, 2);
+});
+
 test('rejects unsupported and credential-bearing URLs without echoing input', () => {
   for (const value of ['file:///secret', 'https://user:SECRET@example.com', 'https://example.com/#SECRET']) {
     assert.throws(() => validateEndpoint(value), (error) => error.code === 'INVALID_URL' && !error.message.includes('SECRET'));

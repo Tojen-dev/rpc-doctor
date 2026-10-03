@@ -50,10 +50,13 @@ async function readBody(response) {
   catch { throw new RpcError('INVALID_RESPONSE', 'Response is not valid JSON.'); }
 }
 
-export async function rpcCall(endpoint, method, params = [], { timeoutMs = 5000 } = {}) {
+export async function rpcCall(endpoint, method, params = [], { timeoutMs = 5000, id = 1 } = {}) {
   const url = validateEndpoint(endpoint);
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) {
     throw new RpcError('INVALID_TIMEOUT', 'Timeout must be an integer from 1 to 60000 ms.');
+  }
+  if (!Number.isSafeInteger(id) || id < 1) {
+    throw new RpcError('INVALID_ID', 'Request ID must be a positive safe integer.');
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -62,7 +65,7 @@ export async function rpcCall(endpoint, method, params = [], { timeoutMs = 5000 
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
       signal: controller.signal,
       redirect: 'error',
     });
@@ -71,7 +74,7 @@ export async function rpcCall(endpoint, method, params = [], { timeoutMs = 5000 
       throw new RpcError(response.status === 429 ? 'RATE_LIMITED' : 'HTTP_ERROR', `HTTP ${response.status}.`);
     }
     const data = await readBody(response);
-    if (!data || Array.isArray(data) || data.jsonrpc !== '2.0' || data.id !== 1 ||
+    if (!data || Array.isArray(data) || data.jsonrpc !== '2.0' || data.id !== id ||
         Object.hasOwn(data, 'result') === Object.hasOwn(data, 'error')) {
       throw new RpcError('INVALID_RESPONSE', 'Invalid JSON-RPC response envelope.');
     }

@@ -15,19 +15,21 @@ export function latencyStats(values) {
   };
 }
 
-async function probe(url, label, samples, timeoutMs, expectedChain) {
+async function probe(url, label, { samples, timeoutMs, expectedChain, warmup }, nextRequestId) {
   const result = {
     endpoint: label, chainId: null, latestBlock: null,
     attempts: 0, successes: 0, errors: {}, latencyMs: latencyStats([]),
     successRate: 0, lagBlocks: null, peerCount: 0, status: 'unreachable',
     ...(expectedChain === undefined ? {} : { networkStatus: 'unknown' }),
+    ...(warmup === 0 ? {} : { warmup: { attempts: 0, successes: 0, errors: {}, durationMs: 0 } }),
   };
-  const recordError = (error) => {
+  const call = (method) => rpcCall(url, method, [], { timeoutMs, id: nextRequestId() });
+  const recordError = (error, errors = result.errors) => {
     const code = error.code ?? 'UNKNOWN_ERROR';
-    result.errors[code] = (result.errors[code] ?? 0) + 1;
+    errors[code] = (errors[code] ?? 0) + 1;
   };
   try {
-    const { result: chainId } = await rpcCall(url, 'eth_chainId', [], { timeoutMs });
+    const { result: chainId } = await call('eth_chainId');
     const observed = parseQuantity(chainId);
     result.chainId = observed.toString();
     if (expectedChain !== undefined) {
@@ -41,11 +43,23 @@ async function probe(url, label, samples, timeoutMs, expectedChain) {
     recordError(error);
     return result;
   }
+  if (warmup > 0) {
+    const started = performance.now();
+    for (let i = 0; i < warmup; i++) {
+      result.warmup.attempts++;
+      try {
+        const { result: block } = await call('eth_blockNumber');
+        parseQuantity(block);
+        result.warmup.successes++;
+      } catch (error) { recordError(error, result.warmup.errors); }
+    }
+    result.warmup.durationMs = Math.round(performance.now() - started);
+  }
   const latencies = [];
   for (let i = 0; i < samples; i++) {
     result.attempts++;
     try {
-      const { result: block, durationMs } = await rpcCall(url, 'eth_blockNumber', [], { timeoutMs });
+      const { result: block, durationMs } = await call('eth_blockNumber');
       const height = parseQuantity(block);
       if (result.latestBlock === null || height > BigInt(result.latestBlock)) {
         result.latestBlock = height.toString();
@@ -57,6 +71,9 @@ async function probe(url, label, samples, timeoutMs, expectedChain) {
   result.latencyMs = latencyStats(latencies);
   result.successRate = Math.round(result.successes / samples * 10000) / 100;
   result.status = result.successes === samples ? 'healthy' : result.successes > 0 ? 'degraded' : 'unreachable';
+  if (result.status === 'healthy' && warmup > 0 && result.warmup.successes < result.warmup.attempts) {
+    result.status = 'degraded';
+  }
   return result;
 }
 
@@ -107,13 +124,16 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
 }
 
 export async function benchmark(endpoints, {
-  samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference, expectedChain,
+  samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference, expectedChain, warmup = 0,
 } = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
   }
   if (!Number.isInteger(samples) || samples < 1 || samples > 100) {
     throw new Error('Samples must be an integer from 1 to 100.');
+  }
+  if (!Number.isInteger(warmup) || warmup < 0 || warmup > 20) {
+    throw new Error('Warm-up must be an integer from 0 to 20.');
   }
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) {
     throw new Error('Timeout must be an integer from 1 to 60000 ms.');
@@ -135,10 +155,14 @@ export async function benchmark(endpoints, {
   const results = new Array(urls.length);
   const workerCount = Math.min(concurrency, urls.length);
   let next = 0;
+  let requestId = 0;
+  const nextRequestId = () => ++requestId;
   async function worker() {
     while (next < urls.length) {
       const index = next++;
-      results[index] = await probe(urls[index], names[index], samples, timeoutMs, expected);
+      results[index] = await probe(urls[index], names[index], {
+        samples, timeoutMs, expectedChain: expected, warmup,
+      }, nextRequestId);
     }
   }
   await Promise.all(Array.from({ length: workerCount }, worker));
@@ -150,6 +174,7 @@ export async function benchmark(endpoints, {
       samples, timeoutMs, concurrency: workerCount, lagThreshold,
       ...(reference === undefined ? {} : { reference }),
       ...(expected === undefined ? {} : { expectedChain: expected.toString() }),
+      ...(warmup === 0 ? {} : { warmup }),
     },
     results: addPeerComparison(results, { lagThreshold, reference }),
   };

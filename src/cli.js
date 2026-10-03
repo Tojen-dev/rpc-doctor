@@ -16,6 +16,7 @@ Usage:
 Options:
   --config <file>     Read an explicit JSON config (at most 64 KiB; no auto-search)
   --samples <n>       Block-number samples per endpoint, 1–100 (default: 5)
+  --warmup <n>        Unmeasured block-number calls per endpoint, 0–20 (default: 0)
   --timeout <ms>      Timeout per request, 1–60000 (default: 5000)
   --concurrency <n>   Maximum simultaneous RPC requests, 1–20 (default: 4)
   --lag-threshold <n> Allowed lag in blocks, 0–9007199254740991 (default: 3)
@@ -28,7 +29,9 @@ Options:
   --version, -v      Show version
 
 At most 20 endpoints; requests per endpoint stay sequential. No transactions sent.
-Concurrency includes handshakes and samples; it also applies to --demo.
+Concurrency includes handshakes, warm-up, and samples; it also applies to --demo.
+Warm-up follows the network guard; failures and elapsed ms are reported separately.
+Maximum requests per endpoint: 1 + warmup + samples. No retries.
 Use environment input for API-key URLs to avoid storing them in shell history.
 Labels also name environment URLs; with --demo, supply three labels or none.
 Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
@@ -37,7 +40,7 @@ URLs: positional > config endpoints > RPC_DOCTOR_ENDPOINTS_JSON.
 Settings: CLI > config > defaults. --label replaces all selected labels;
 config labels apply only to config URLs, otherwise the default is RPC N.
 Config fields: endpoints [{label, url OR urlEnv}], samples, timeout (ms), concurrency,
-lagThreshold, reference, expectedChain. Config expectedChain must be a string.
+lagThreshold, reference, expectedChain, warmup. Config expectedChain must be a string.
 Expected chain range: 0–2^256-1; no leading zeros, signs, or whitespace.
 Mismatched endpoints keep their observed ID but receive no block samples.
 Without a reference, lag uses the same-chain peer maximum.
@@ -47,6 +50,7 @@ Unknown fields and missing/empty environment references are errors, even if over
 --demo cannot be combined with --config. Help/version do not read config files.
 Exit codes: 0 = at least one usable endpoint; 1 = none usable; 2 = invalid usage/runtime error.
 With expected-chain, only successful block samples on that chain count as usable.
+Warm-up successes never count as usable samples or affect block/lag/latency stats.
 `;
 
 export async function main(args, env, stdout, stderr) {
@@ -55,7 +59,7 @@ export async function main(args, env, stdout, stderr) {
     try {
       parsed = parseArgs({ args, allowPositionals: true, strict: true, options: {
         config: { type: 'string' }, samples: { type: 'string' }, timeout: { type: 'string' },
-        concurrency: { type: 'string' },
+        concurrency: { type: 'string' }, warmup: { type: 'string' },
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
         'expected-chain': { type: 'string' },
         label: { type: 'string', multiple: true },
@@ -76,6 +80,9 @@ export async function main(args, env, stdout, stderr) {
     if (values.concurrency !== undefined && (values.concurrency.length === 0 || /\D/.test(values.concurrency))) {
       throw new Error('Concurrency must be an integer from 1 to 20.');
     }
+    if (values.warmup !== undefined && (values.warmup.length === 0 || /\D/.test(values.warmup))) {
+      throw new Error('Warm-up must be an integer from 0 to 20.');
+    }
     if (values['lag-threshold'] !== undefined && (values['lag-threshold'].length === 0 || /\D/.test(values['lag-threshold']))) {
       throw new Error('Lag threshold must be an integer from 0 to 9007199254740991.');
     }
@@ -88,6 +95,7 @@ export async function main(args, env, stdout, stderr) {
     const config = values.config === undefined ? {} : await loadConfig(values.config, env);
     const options = {
       samples: values.samples === undefined ? config.samples ?? 5 : Number(values.samples),
+      warmup: values.warmup === undefined ? config.warmup ?? 0 : Number(values.warmup),
       timeoutMs: values.timeout === undefined ? config.timeoutMs ?? 5000 : Number(values.timeout),
       concurrency: values.concurrency === undefined ? config.concurrency ?? 4 : Number(values.concurrency),
       lagThreshold: values['lag-threshold'] === undefined ? config.lagThreshold ?? 3 : Number(values['lag-threshold']),
@@ -117,7 +125,7 @@ export async function main(args, env, stdout, stderr) {
     return report.results.some((result) => result.successes > 0) ? 0 : 1;
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
-    const expected = /^(Use |Provide |Samples |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
+    const expected = /^(Use |Provide |Samples |Warm-up |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
     stderr.write(`RPC Doctor: ${error instanceof ConfigError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }

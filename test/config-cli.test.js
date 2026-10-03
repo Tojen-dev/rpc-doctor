@@ -261,6 +261,42 @@ test('invalid explicit config expectedChain cannot be hidden by CLI overrides', 
   assert.equal(requests, 0);
 });
 
+test('warm-up uses CLI over config over zero, including an explicit zero override', async (t) => {
+  const { path } = await fixture(t);
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const [config, flags, warmup] of [
+    [{}, [], 0], [{ warmup: 0 }, [], 0], [{ warmup: 20 }, [], 20],
+    [{ warmup: 3 }, ['--warmup', '1'], 1], [{ warmup: 3 }, ['--warmup', '0'], 0],
+  ]) {
+    requests = 0;
+    await writeFile(path, JSON.stringify({ endpoints: [{ label: 'Configured node', url: server.url }], ...config }));
+    const result = await run(['--config', path, '--samples', '1', '--json', ...flags]);
+    assert.equal(result.code, 0, result.err);
+    const report = JSON.parse(result.out);
+    assert.equal(report.results[0].endpoint, 'Configured node');
+    assert.equal(report.settings.warmup, warmup || undefined);
+    assert.equal(report.results[0].warmup?.attempts, warmup || undefined);
+    assert.equal(requests, 2 + warmup);
+  }
+});
+
+test('invalid explicit config warm-up cannot be hidden by CLI overrides', async (t) => {
+  const { path } = await fixture(t);
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const warmup of [null, '1', false, -1, 1.5, 21, [], {}, 'SYNTHETIC_SECRET\x1b']) {
+    await writeFile(path, JSON.stringify({ warmup }));
+    const result = await run(['--config', path, '--warmup', '0', server.url]);
+    assert.equal(result.code, 2);
+    assert.equal(result.out, '');
+    assert.equal(result.err, 'RPC Doctor: Config warmup must be an integer from 0 to 20.\n');
+  }
+  assert.equal(requests, 0);
+});
+
 test('explicit config is fully validated even when overridden, before any request, without leaking input', async (t) => {
   const { directory, path } = await fixture(t);
   let requests = 0;
@@ -293,11 +329,12 @@ test('help/version skip config reads and references; demo rejects config before 
   const { directory, path } = await fixture(t);
   await writeFile(path, '{"endpoints":[{"label":"Node","urlEnv":"MISSING_SECRET"}]}');
   for (const file of [path, join(directory, 'missing.json')]) {
-    const help = await run(['--config', file, '--demo', '--help']);
+    const help = await run(['--config', file, '--warmup', 'invalid', '--demo', '--help']);
     assert.equal(help.code, 0);
     assert.match(help.out, /--config <file>/);
+    assert.match(help.out, /--warmup <n>/);
     assert.equal(help.err, '');
-    const version = await run(['--config', file, '--version']);
+    const version = await run(['--config', file, '--warmup', 'invalid', '--version']);
     assert.equal(version.code, 0);
     assert.equal(version.out, '0.1.0\n');
     assert.equal(version.err, '');

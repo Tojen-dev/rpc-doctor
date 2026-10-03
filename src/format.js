@@ -1,6 +1,7 @@
 export function formatTable(report) {
   const reference = report.settings.reference;
   const guarded = report.settings.expectedChain !== undefined;
+  const warmed = report.settings.warmup > 0;
   const lagChecks = {
     reference: 'reference (unverified)', compared: 'compared', ahead: 'ahead of reference',
     reference_unavailable: 'reference unavailable', different_chain: 'different chain', no_data: 'no block data',
@@ -8,19 +9,24 @@ export function formatTable(report) {
   };
   const headers = ['Endpoint', 'Chain', ...(guarded ? ['Network'] : []), 'Status', 'OK', 'Median', 'p95', 'Block', 'Lag'];
   if (reference !== undefined) headers.push('Lag check');
+  if (warmed) headers.push('Warm-up OK', 'Warm-up elapsed');
   const ms = (value) => value === null ? '—' : `${value.toFixed(1)}ms`;
   const rows = report.results.map((r) => [
     r.endpoint, r.chainId ?? '—', ...(guarded ? [r.networkStatus] : []), r.status, `${r.successes}/${r.attempts}`,
     ms(r.latencyMs.median), ms(r.latencyMs.p95), r.latestBlock ?? '—', r.lagBlocks ?? '—',
     ...(reference === undefined ? [] : [lagChecks[r.lagStatus] ?? '—']),
+    ...(warmed ? [`${r.warmup.successes}/${r.warmup.attempts}`, `${r.warmup.durationMs}ms`] : []),
   ]);
   const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((row) => row[i].length)));
   const line = (row) => row.map((cell, i) => cell.padEnd(widths[i])).join('  ').trimEnd();
   const errors = report.results.flatMap((r) => Object.entries(r.errors).map(([code, count]) => `  ${r.endpoint}: ${code} × ${count}`));
+  const warmupErrors = warmed ? report.results.flatMap((r) => Object.entries(r.warmup.errors).map(([code, count]) => `  ${r.endpoint}: ${code} × ${count}`)) : [];
   return [
     report.demo ? 'RPC Doctor · local demo (synthetic endpoints)' : 'RPC Doctor', '',
     line(headers), line(widths.map((w) => '─'.repeat(w))), ...rows.map(line), '',
     `Samples: ${report.settings.samples} · Timeout: ${report.settings.timeoutMs}ms · Concurrency: ${report.settings.concurrency} · Elapsed: ${report.durationMs}ms`,
+    ...(warmed ? [`Warm-up: ${report.settings.warmup} calls per endpoint after the network guard; included in Elapsed.`,
+      'Warm-up OK is successes/attempts; warm-up time and errors are separate from measured samples.'] : []),
     `Lag threshold: ${report.settings.lagThreshold} blocks.`,
     ...(guarded ? [`Expected chain: ${report.settings.expectedChain}. Mismatched endpoints receive no block samples.`] : []),
     ...(reference === undefined
@@ -30,5 +36,6 @@ export function formatTable(report) {
         'The reference is not checked for freshness; endpoints ahead of it have lag 0.']),
     'Endpoint labels follow input order. URLs are omitted to protect API keys.',
     ...(errors.length ? ['', 'Errors:', ...errors] : []),
+    ...(warmupErrors.length ? ['', 'Warm-up errors:', ...warmupErrors] : []),
   ].join('\n');
 }

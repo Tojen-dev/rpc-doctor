@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
 
+const requestIds = new WeakMap();
+
 export async function serve(handler) {
   const server = createServer(async (req, res) => {
     let body = '';
@@ -7,6 +9,7 @@ export async function serve(handler) {
     let request;
     try { request = JSON.parse(body); }
     catch { res.writeHead(400).end(); return; }
+    requestIds.set(res, request.id);
     await handler(request, res);
   });
   await new Promise((resolve, reject) => {
@@ -19,7 +22,7 @@ export async function serve(handler) {
   };
 }
 
-export function reply(res, result, id = 1) {
+export function reply(res, result, id = requestIds.get(res)) {
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ jsonrpc: '2.0', id, result }));
 }

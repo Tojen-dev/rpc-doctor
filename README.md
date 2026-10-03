@@ -119,13 +119,14 @@ the environment, not the file. Labels follow the same sanitization rules as
 in config error messages.
 
 The file must be a regular file of at most 64 KiB. Only `endpoints`, `samples`,
-`timeout`, `concurrency`, `lagThreshold`, `reference`, and `expectedChain` are
+`timeout`, `concurrency`, `lagThreshold`, `reference`, `expectedChain`, and `warmup` are
 allowed at the top level; all are optional. A settings-only file such as `{"samples": 10}` works with
 CLI or environment URLs. If present, `endpoints`
 must contain 1–20 entries with distinct HTTP(S) URLs. Unknown fields at either
 level, wrong types, userinfo/fragments, and missing environment references are
 errors. `samples` must be an integer from 1 to 100; `timeout` is an integer from
-1 to 60000 milliseconds; `concurrency` is an integer from 1 to 20. `lagThreshold`
+1 to 60000 milliseconds; `concurrency` is an integer from 1 to 20; `warmup` is an
+integer from 0 to 20. `lagThreshold`
 is an integer from 0 to 9007199254740991; `reference` is an integer index from 1 to
 the selected endpoint count. Those settings require JSON numbers. `expectedChain`
 is a string identifier, using the decimal or hex format described below; JSON
@@ -136,6 +137,7 @@ numbers are not accepted for chain IDs, even when they are small.
 | Endpoint list | Positional URLs → config `endpoints` → `RPC_DOCTOR_ENDPOINTS_JSON` |
 | Endpoint names | Explicit `--label` list → selected config endpoint labels → `RPC N` |
 | Samples / timeout | Explicit CLI option → config value → 5 / 5000 ms |
+| Warm-up | Explicit `--warmup` → config `warmup` → 0 |
 | Concurrency | Explicit `--concurrency` → config `concurrency` → 4 |
 | Lag threshold | Explicit `--lag-threshold` → config `lagThreshold` → 3 blocks |
 | Reference | Explicit `--reference` → config `reference` → same-chain peer maximum |
@@ -165,9 +167,9 @@ environment references. Without `--config`, existing CLI behavior is unchanged.
 | OK | Successful block-number samples / attempted samples |
 | Median | Median latency of successful block-number calls |
 | p95 | Nearest-rank 95th percentile of successful calls |
-| Block | Highest block observed during the run, stored without integer precision loss |
+| Block | Highest block from successful measured samples, stored without integer precision loss |
 | Lag | Non-negative block difference from the same-chain peer maximum, or the explicit reference; unknown when comparison is unavailable |
-| Status | Healthy when samples pass and lag is within the threshold; degraded on partial failure, larger lag, or unusable reference; unreachable when probing fails; mismatch when the observed network is rejected by the optional guard |
+| Status | Healthy when samples pass and lag is within the threshold; degraded on partial failure, warm-up errors, larger lag, or unusable reference; unreachable when probing fails; mismatch when the observed network is rejected by the optional guard |
 
 Failed calls do not enter latency statistics. Their counts and categories remain
 visible in the report. A failed chain handshake produces zero block samples.
@@ -180,8 +182,8 @@ may observe later blocks. Relative lag is approximate, not a synchronized or tru
 measurement. A single endpoint, or peers that are all behind, cannot establish freshness.
 Five samples make a quick check, not a statistically robust p95 benchmark.
 
-Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including both
-chain handshakes and block samples. Each endpoint's requests remain sequential;
+Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including
+chain handshakes, optional warm-up, and block samples. Each endpoint's requests remain sequential;
 a worker moves to the next endpoint only after completing its current probe.
 Failures and timeouts release the worker without retries or hiding failed attempts.
 Aborting a timed-out request cannot guarantee that a remote provider stops processing it.
@@ -192,6 +194,59 @@ one at a time. A limit above the number of endpoints is accepted and creates no
 extra requests. The table summary and existing JSON `settings.concurrency` field
 report the effective worker count: the smaller of the selected limit and endpoint
 count. `schemaVersion` remains `1`.
+
+## Optional warm-up
+
+Use `--warmup <n>` or the config number `"warmup": n` to send **0–20 unmeasured
+`eth_blockNumber` calls per endpoint**, default `0`. CLI takes precedence over
+config, including `--warmup 0` to disable configured warm-up. Invalid explicit
+config values remain errors even when overridden; validation happens before RPC.
+
+```sh
+node bin/rpc-doctor.js --demo --warmup 2 --samples 10 --json
+```
+
+Each endpoint completes its `eth_chainId` handshake and expected-chain guard
+first, then all warm-up calls, then the requested measured samples. A failed
+handshake or network mismatch skips both block phases. Requests stay sequential
+per endpoint under the same concurrency cap and timeout, with the same response
+validation. Request IDs are unique within each benchmark run. Warm-up errors are
+recorded without retries: the remaining warm-up calls and measured samples still
+run, even if every warm-up call fails.
+
+Warm-up can reduce some connection or provider cache effects, but the handshake
+already usually establishes the connection. It cannot guarantee a warm provider,
+fair comparisons, or representative latency. It also consumes request quota and
+time, and may itself trigger rate limits that affect subsequent measurements.
+Use it only when that tradeoff suits the measurement.
+
+With warm-up enabled, JSON adds `settings.warmup` and a `warmup` object to every
+endpoint result:
+
+| Warm-up field | Meaning |
+| --- | --- |
+| `attempts` / `successes` | Attempted / successful warm-up calls only |
+| `errors` | Sanitized failure-category counts, including invalid responses and timeouts |
+| `durationMs` | Elapsed wall-clock milliseconds for the complete warm-up phase, including failures |
+
+Skipped warm-up has zero attempts, successes, and duration, with empty errors.
+The table adds `Warm-up OK` (successes/attempts), `Warm-up elapsed` in milliseconds,
+and a separate `Warm-up errors` section when needed. Whole-run `durationMs` / table
+`Elapsed` includes handshake, warm-up, and measurement overhead; per-endpoint
+warm-up durations can overlap under concurrency and should not be summed to infer
+whole-run time.
+
+Measured attempts, successes, success rate, errors, latency percentiles, Block,
+and lag exclude all warm-up results. The existing `errors` field still includes
+handshake failures. Even a higher warm-up block cannot become a lag baseline, and
+warm-up success alone cannot make a reference usable. Warm-up errors produce
+`degraded` status if any measured samples succeed; no successful measured sample
+means `unreachable`. Exit `0`/`1` still depends only on measured successes.
+
+At `warmup: 0`, including when the option is omitted, no extra calls or report
+fields/columns are added. The JSON schema version remains `1`. The demo accepts
+warm-up; its third endpoint rate-limits every third block call, counting both
+phases, so warm-up can shift which measured requests fail.
 
 ## Lag policy
 
@@ -218,7 +273,7 @@ sample does not establish that the reference is current or trustworthy.
 
 | Explicit-reference case | Lag / JSON `lagStatus` | Result status |
 | --- | --- | --- |
-| Same-chain peer at or below reference | Exact difference / `compared` | Degraded only if above threshold or samples failed |
+| Same-chain peer at or below reference | Exact difference / `compared` | Degraded if above threshold, samples failed, or warm-up had errors |
 | Peer above reference | `0` / `ahead` | Request failures still determine degradation |
 | Reference itself, including a one-endpoint run | Unknown / `reference` | Based on request success only; freshness unverified |
 | Reference has no usable chain/block | Unknown / `reference_unavailable` for usable peers | Peers remain usable but degraded; no fallback to another endpoint |
@@ -289,6 +344,7 @@ Without the guard, behavior and report fields remain unchanged; `expectedChain`,
 | --- | --- | --- |
 | `--config <file>` | None | Explicit JSON file, at most 64 KiB; incompatible with `--demo` |
 | `--samples <n>` | 5 | 1–100 samples per endpoint |
+| `--warmup <n>` | 0 | 0–20 unmeasured block calls per endpoint; failures and elapsed ms reported separately |
 | `--timeout <ms>` | 5000 | 1–60000 ms per complete request, including body |
 | `--concurrency <n>` | 4 | 1–20 simultaneous RPC requests; CLI overrides config; works with `--demo` |
 | `--lag-threshold <n>` | 3 | Maximum allowed lag; integer from 0 to 9007199254740991 |
@@ -301,8 +357,15 @@ Without the guard, behavior and report fields remain unchanged; `expectedChain`,
 | `--version`, `-v` | | Version |
 
 Supply 1–20 distinct HTTP(S) URLs. URL userinfo, fragments, and redirects are refused.
-Response bodies are limited to 1 MiB. Each healthy endpoint receives one handshake
-plus the configured number of samples. Respect your provider's request allowance.
+Response bodies are limited to 1 MiB. Each endpoint receives at most
+**`1 + warmup + samples` requests** (one handshake, warm-up, measured samples).
+Failed or mismatched handshakes stop after one request; later failures do not
+reduce the configured attempt count. Warm-up adds up to `warmup × timeout` ms of
+request waiting per accepted endpoint, plus processing overhead. With concurrency
+`C` and `E` endpoints, up to `ceil(E / C)` groups occupy workers; a conservative
+request-time allowance is `ceil(E / C) × (1 + warmup + samples) × timeout` ms,
+plus scheduling/processing overhead. This is not an enforced whole-run deadline.
+Respect your provider's request allowance.
 
 Exit `0`: run completed with at least one usable endpoint (others may be degraded).
 Exit `1`: no usable block samples (including mismatches when the guard is enabled).

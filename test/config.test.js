@@ -18,18 +18,18 @@ test('loads named URLs and entire-URL environment references with safe labels an
       { label: '  Primary\n\x1b\u202e node ', urlEnv: 'PRIMARY_RPC_URL' },
       { label: 'Резервний вузол', url: 'http://127.0.0.1:8545' },
     ], samples: 100, timeout: 60000, concurrency: 20, lagThreshold: Number.MAX_SAFE_INTEGER, reference: 2,
-    expectedChain: '0x20000000000001',
+    expectedChain: '0x20000000000001', warmup: 20,
   }));
   const result = await loadConfig(path, { PRIMARY_RPC_URL: 'https://rpc.example/SYNTHETIC_SECRET' });
   assert.deepEqual(result, {
     endpoints: ['https://rpc.example/SYNTHETIC_SECRET', 'http://127.0.0.1:8545/'],
     labels: ['Primary node', 'Резервний вузол'], samples: 100, timeoutMs: 60000, concurrency: 20,
-    lagThreshold: Number.MAX_SAFE_INTEGER, reference: 2, expectedChain: '9007199254740993',
+    lagThreshold: Number.MAX_SAFE_INTEGER, reference: 2, expectedChain: '9007199254740993', warmup: 20,
   });
   await writeFile(path, '{}');
   assert.deepEqual(await loadConfig(path, {}), {});
-  await writeFile(path, '{"samples":1,"timeout":1,"concurrency":1,"lagThreshold":0,"reference":1}');
-  assert.deepEqual(await loadConfig(path, {}), { samples: 1, timeoutMs: 1, concurrency: 1, lagThreshold: 0, reference: 1 });
+  await writeFile(path, '{"samples":1,"timeout":1,"concurrency":1,"lagThreshold":0,"reference":1,"warmup":0}');
+  assert.deepEqual(await loadConfig(path, {}), { samples: 1, timeoutMs: 1, concurrency: 1, lagThreshold: 0, reference: 1, warmup: 0 });
 });
 
 test('rejects invalid structures, types, unknown fields, URLs and labels with static errors', async (t) => {
@@ -39,6 +39,7 @@ test('rejects invalid structures, types, unknown fields, URLs and labels with st
     null, [], 1, true, 'SYNTHETIC_SECRET',
     { SYNTHETIC_SECRET: true }, { timeoutMs: 200 }, { labels: ['Primary'] },
     ...[null, '1', false, 0, -1, 1.5, 101].map((samples) => ({ samples })),
+    ...[null, '1', false, -1, 1.5, 21, [], {}].map((warmup) => ({ warmup })),
     ...[null, '100', false, 0, -1, 1.5, 60001].map((timeout) => ({ timeout })),
     ...[null, '1', false, 0, -1, 1.5, 21, [], {}].map((concurrency) => ({ concurrency })),
     ...[null, '3', false, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, [], {}].map((lagThreshold) => ({ lagThreshold })),
