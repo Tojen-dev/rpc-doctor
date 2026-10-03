@@ -86,8 +86,7 @@ test('labels preserve positional URL order when probes complete out of order in 
   let releaseFirst;
   let completed;
   const first = await serve(async (req, res) => {
-    if (req.method === 'eth_chainId') await firstGate;
-    else completed.push('first');
+    if (req.method === 'eth_blockNumber') { await firstGate; completed.push('first'); }
     reply(res, req.method === 'eth_chainId' ? '0x1' : '0x10');
   });
   t.after(first.close);
@@ -113,8 +112,8 @@ test('labels preserve positional URL order when probes complete out of order in 
       assert.deepEqual(JSON.parse(result.out).results.map((r) => [r.endpoint, r.latestBlock]),
         [['Primary node', '16'], ['Резервний вузол', '32']]);
     } else {
-      assert.match(result.out, /^Primary node\s+1\s+degraded\s+1\/1.*\s16\s+16$/m);
-      assert.match(result.out, /^Резервний вузол\s+1\s+healthy\s+1\/1.*\s32\s+0$/m);
+      assert.match(result.out, /^Primary node\s+1\s+degraded\s+1\/1.*\s16\s+16\s+\d+–\d+$/m);
+      assert.match(result.out, /^Резервний вузол\s+1\s+healthy\s+1\/1.*\s32\s+0\s+\d+–\d+$/m);
       assert.ok(result.out.indexOf('Primary node') < result.out.indexOf('Резервний вузол'));
     }
     assert.equal((result.out + result.err).includes(first.url), false);
@@ -264,8 +263,8 @@ test('demo applies lag threshold and reference policy in table/JSON', async () =
   assert.equal(table.code, 0, table.err);
   assert.match(table.out, /Lag threshold: 0 blocks/);
   assert.match(table.out, /Reference: endpoint 2 \(RPC 2\)/);
-  assert.match(table.out, /^RPC 1\s+1\s+healthy.*\s0\s+ahead of reference$/m);
-  assert.match(table.out, /^RPC 2\s+1\s+healthy.*\s—\s+reference \(unverified\)$/m);
+  assert.match(table.out, /^RPC 1\s+1\s+healthy.*\s0\s+ahead of reference\s+\d+–\d+$/m);
+  assert.match(table.out, /^RPC 2\s+1\s+healthy.*\s—\s+reference \(unverified\)\s+\d+–\d+$/m);
   const reference = await run(['--demo', '--samples', '1', '--reference', '1', '--lag-threshold', '0', '--json']);
   assert.equal(reference.code, 0, reference.err);
   const selected = JSON.parse(reference.out);
@@ -295,7 +294,7 @@ test('unavailable reference leaves successful results usable with explicit table
       assert.equal(row.lagStatus, 'reference_unavailable');
       assert.equal(row.successes, 1);
     } else {
-      assert.match(result.out, /^Successful node\s+1\s+degraded\s+1\/1.*reference unavailable$/m);
+      assert.match(result.out, /^Successful node\s+1\s+degraded\s+1\/1.*reference unavailable\s+\d+–\d+$/m);
       assert.match(result.out, /No fallback/);
     }
   }
@@ -368,8 +367,8 @@ test('mixed network results use successful matching samples for exit status and 
       assert.equal(peer.lagStatus, 'reference_mismatch');
       assert.equal(peer.successes, 1);
     } else {
-      assert.match(result.out, /^Wrong reference\s+2\s+mismatch\s+mismatch\s+0\/0.*wrong chain$/m);
-      assert.match(result.out, /^Accepted peer\s+1\s+match\s+degraded\s+1\/1.*reference wrong chain$/m);
+      assert.match(result.out, /^Wrong reference\s+2\s+mismatch\s+mismatch\s+0\/0.*wrong chain\s+—$/m);
+      assert.match(result.out, /^Accepted peer\s+1\s+match\s+degraded\s+1\/1.*reference wrong chain\s+\d+–\d+$/m);
     }
   }
   failMatchingBlocks = true;

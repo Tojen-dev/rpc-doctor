@@ -30,6 +30,11 @@ Options:
 
 At most 20 endpoints; requests per endpoint stay sequential. No transactions sent.
 Concurrency includes handshakes, warm-up, and samples; it also applies to --demo.
+All endpoints finish preparation before sampling begins. Each measured round sends
+one call per accepted endpoint and waits for all outcomes before the next round.
+No pacing delay is added. Slow endpoints delay all peers; observations are not synchronized.
+JSON records round boundaries and each attempt's start/finish in elapsed client ms
+from startedAt; the table shows each endpoint's first-start to last-finish window.
 Warm-up follows the network guard; failures and elapsed ms are reported separately.
 Maximum requests per endpoint: 1 + warmup + samples. No retries.
 Use environment input for API-key URLs to avoid storing them in shell history.

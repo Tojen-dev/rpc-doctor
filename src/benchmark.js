@@ -15,19 +15,23 @@ export function latencyStats(values) {
   };
 }
 
-async function probe(url, label, { samples, timeoutMs, expectedChain, warmup }, nextRequestId) {
+function recordError(error, errors) {
+  const code = error.code ?? 'UNKNOWN_ERROR';
+  errors[code] = (errors[code] ?? 0) + 1;
+  return code;
+}
+
+async function prepareProbe(url, label, { timeoutMs, expectedChain, warmup }, nextRequestId) {
   const result = {
     endpoint: label, chainId: null, latestBlock: null,
     attempts: 0, successes: 0, errors: {}, latencyMs: latencyStats([]),
     successRate: 0, lagBlocks: null, peerCount: 0, status: 'unreachable',
+    observations: [],
     ...(expectedChain === undefined ? {} : { networkStatus: 'unknown' }),
     ...(warmup === 0 ? {} : { warmup: { attempts: 0, successes: 0, errors: {}, durationMs: 0 } }),
   };
   const call = (method) => rpcCall(url, method, [], { timeoutMs, id: nextRequestId() });
-  const recordError = (error, errors = result.errors) => {
-    const code = error.code ?? 'UNKNOWN_ERROR';
-    errors[code] = (errors[code] ?? 0) + 1;
-  };
+  const probe = { result, call, latencies: [], ready: false };
   try {
     const { result: chainId } = await call('eth_chainId');
     const observed = parseQuantity(chainId);
@@ -36,12 +40,12 @@ async function probe(url, label, { samples, timeoutMs, expectedChain, warmup }, 
       result.networkStatus = observed === expectedChain ? 'match' : 'mismatch';
       if (result.networkStatus === 'mismatch') {
         result.status = 'mismatch';
-        return result;
+        return probe;
       }
     }
   } catch (error) {
-    recordError(error);
-    return result;
+    recordError(error, result.errors);
+    return probe;
   }
   if (warmup > 0) {
     const started = performance.now();
@@ -55,26 +59,41 @@ async function probe(url, label, { samples, timeoutMs, expectedChain, warmup }, 
     }
     result.warmup.durationMs = Math.round(performance.now() - started);
   }
-  const latencies = [];
-  for (let i = 0; i < samples; i++) {
-    result.attempts++;
-    try {
-      const { result: block, durationMs } = await call('eth_blockNumber');
-      const height = parseQuantity(block);
-      if (result.latestBlock === null || height > BigInt(result.latestBlock)) {
-        result.latestBlock = height.toString();
-      }
-      result.successes++;
-      latencies.push(durationMs);
-    } catch (error) { recordError(error); }
+  probe.ready = true;
+  return probe;
+}
+
+async function sampleProbe({ result, call, latencies }, round, elapsedMs) {
+  const observation = { round, startedMs: elapsedMs(), finishedMs: null, block: null, error: null };
+  result.attempts++;
+  try {
+    const { result: block, durationMs } = await call('eth_blockNumber');
+    const height = parseQuantity(block);
+    observation.block = height.toString();
+    if (result.latestBlock === null || height > BigInt(result.latestBlock)) {
+      result.latestBlock = observation.block;
+    }
+    result.successes++;
+    latencies.push(durationMs);
+  } catch (error) {
+    observation.error = recordError(error, result.errors);
+  } finally {
+    observation.finishedMs = elapsedMs();
+    result.observations.push(observation);
   }
-  result.latencyMs = latencyStats(latencies);
-  result.successRate = Math.round(result.successes / samples * 10000) / 100;
-  result.status = result.successes === samples ? 'healthy' : result.successes > 0 ? 'degraded' : 'unreachable';
-  if (result.status === 'healthy' && warmup > 0 && result.warmup.successes < result.warmup.attempts) {
-    result.status = 'degraded';
+}
+
+// Each phase owns at most one sequential operation per worker. Await the whole
+// pool before reusing it so preparation and successive rounds cannot overlap.
+async function runPhase(items, concurrency, operation) {
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next++;
+      await operation(items[index], index);
+    }
   }
-  return result;
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
 }
 
 export function addPeerComparison(results, { lagThreshold = 3, reference } = {}) {
@@ -151,31 +170,45 @@ export async function benchmark(endpoints, {
   const names = endpointLabels(labels, endpoints.length);
   const urls = endpoints.map(validateEndpoint);
   if (new Set(urls).size !== urls.length) throw new Error('Duplicate endpoints are not allowed.');
+  const startedAt = new Date().toISOString();
   const started = performance.now();
-  const results = new Array(urls.length);
+  const elapsedMs = () => Math.round(performance.now() - started);
+  const probes = new Array(urls.length);
   const workerCount = Math.min(concurrency, urls.length);
-  let next = 0;
   let requestId = 0;
   const nextRequestId = () => ++requestId;
-  async function worker() {
-    while (next < urls.length) {
-      const index = next++;
-      results[index] = await probe(urls[index], names[index], {
-        samples, timeoutMs, expectedChain: expected, warmup,
-      }, nextRequestId);
+  await runPhase(urls, workerCount, async (url, index) => {
+    probes[index] = await prepareProbe(url, names[index], {
+      timeoutMs, expectedChain: expected, warmup,
+    }, nextRequestId);
+  });
+  const accepted = probes.filter((probe) => probe.ready);
+  const rounds = [];
+  for (let round = 1; accepted.length > 0 && round <= samples; round++) {
+    const startedMs = elapsedMs();
+    await runPhase(accepted, workerCount, (probe) => sampleProbe(probe, round, elapsedMs));
+    rounds.push({ round, startedMs, finishedMs: elapsedMs() });
+  }
+  for (const { result, latencies } of accepted) {
+    result.latencyMs = latencyStats(latencies);
+    result.successRate = Math.round(result.successes / samples * 10000) / 100;
+    result.status = result.successes === samples ? 'healthy' : result.successes > 0 ? 'degraded' : 'unreachable';
+    if (result.status === 'healthy' && warmup > 0 && result.warmup.successes < result.warmup.attempts) {
+      result.status = 'degraded';
     }
   }
-  await Promise.all(Array.from({ length: workerCount }, worker));
   return {
     schemaVersion: 1,
+    startedAt,
     generatedAt: new Date().toISOString(),
-    durationMs: Math.round(performance.now() - started),
+    durationMs: elapsedMs(),
     settings: {
       samples, timeoutMs, concurrency: workerCount, lagThreshold,
       ...(reference === undefined ? {} : { reference }),
       ...(expected === undefined ? {} : { expectedChain: expected.toString() }),
       ...(warmup === 0 ? {} : { warmup }),
     },
-    results: addPeerComparison(results, { lagThreshold, reference }),
+    rounds,
+    results: addPeerComparison(probes.map((probe) => probe.result), { lagThreshold, reference }),
   };
 }

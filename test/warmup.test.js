@@ -73,9 +73,12 @@ test('zero warm-up preserves default report fields and request count; twenty cal
       assert.equal(Object.hasOwn(report.settings, 'warmup'), false);
       assert.equal(Object.hasOwn(row, 'warmup'), false);
       assert.doesNotMatch(formatTable(report), /Warm-up/);
-      // Only wall-clock measurements and the generation timestamp may differ.
-      reports.push({ ...report, generatedAt: '', durationMs: 0,
-        results: [{ ...row, latencyMs: { min: 1, median: 1, p95: 1, max: 1 } }],
+      // Only clock measurements and timestamps may differ.
+      const normalizeTime = (value) => ({ ...value, startedMs: 0, finishedMs: 0 });
+      reports.push({ ...report, startedAt: '', generatedAt: '', durationMs: 0,
+        rounds: report.rounds.map(normalizeTime),
+        results: [{ ...row, observations: row.observations.map(normalizeTime),
+          latencyMs: { min: 1, median: 1, p95: 1, max: 1 } }],
       });
     }
   }

@@ -23,10 +23,10 @@ rate-limited. Example output below is synthetic; timings vary by machine.
 ```text
 RPC Doctor · local demo (synthetic endpoints)
 
-Endpoint  Chain  Status    OK   Median  p95     Block  Lag
-RPC 1     1      healthy   5/5  7.0ms   7.6ms   256    0
-RPC 2     1      degraded  5/5  37.6ms  37.9ms  250    6
-RPC 3     1      degraded  4/5  17.8ms  17.9ms  256    0
+Endpoint  Chain  Status    OK   Median  p95     Block  Lag  Observed (ms)
+RPC 1     1      healthy   5/5  7.0ms   7.6ms   256    0    40–199
+RPC 2     1      degraded  5/5  37.6ms  37.9ms  250    6    40–230
+RPC 3     1      degraded  4/5  17.8ms  17.9ms  256    0    40–210
 ```
 
 ## Compare your endpoints
@@ -170,6 +170,7 @@ environment references. Without `--config`, existing CLI behavior is unchanged.
 | Block | Highest block from successful measured samples, stored without integer precision loss |
 | Lag | Non-negative block difference from the same-chain peer maximum, or the explicit reference; unknown when comparison is unavailable |
 | Status | Healthy when samples pass and lag is within the threshold; degraded on partial failure, warm-up errors, larger lag, or unusable reference; unreachable when probing fails; mismatch when the observed network is rejected by the optional guard |
+| Observed (ms) | First measured request start through last finish, in client milliseconds from run start; includes failed attempts and gaps between rounds; `—` means no measured attempts |
 
 Failed calls do not enter latency statistics. Their counts and categories remain
 visible in the report. A failed chain handshake produces zero block samples.
@@ -177,23 +178,82 @@ visible in the report. A failed chain handshake produces zero block samples.
 
 These are client-observed timings, including network and provider overhead. The
 chain handshake usually establishes the connection before measured samples. There
-are no retries. By default, up to four endpoints run concurrently; later endpoints
-may observe later blocks. Relative lag is approximate, not a synchronized or trusted chain-head
+are no retries. By default, up to four endpoints run concurrently within each
+round; queued endpoints may observe later blocks. Relative lag is approximate, not a synchronized or trusted chain-head
 measurement. A single endpoint, or peers that are all behind, cannot establish freshness.
 Five samples make a quick check, not a statistically robust p95 benchmark.
 
 Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including
-chain handshakes, optional warm-up, and block samples. Each endpoint's requests remain sequential;
-a worker moves to the next endpoint only after completing its current probe.
+chain handshakes, optional warm-up, and block samples. Each endpoint's requests remain sequential.
+A preparation worker finishes one endpoint's handshake and warm-up before moving
+to the next endpoint. Measured workers instead perform one attempt per endpoint
+per round, with a barrier after preparation and after every round.
 Failures and timeouts release the worker without retries or hiding failed attempts.
 Aborting a timed-out request cannot guarantee that a remote provider stops processing it.
 Results and labels stay in input order regardless of completion order.
 
-For example, `node bin/rpc-doctor.js --demo --concurrency 1` probes the demo endpoints
-one at a time. A limit above the number of endpoints is accepted and creates no
+For example, `node bin/rpc-doctor.js --demo --concurrency 1` prepares the demo endpoints
+one at a time, then samples RPC 1, RPC 2, RPC 3 in each round. A limit above the number of endpoints is accepted and creates no
 extra requests. The table summary and existing JSON `settings.concurrency` field
 report the effective worker count: the smaller of the selected limit and endpoint
 count. `schemaVersion` remains `1`.
+
+## Sampling rounds and observation times
+
+Measured sampling always runs in **rounds**. All endpoints first finish preparation:
+their chain handshake, expected-chain check, and optional warm-up. A failed
+handshake or network mismatch excludes that endpoint from measured rounds. Warm-up
+errors remain visible and do not exclude an otherwise accepted endpoint.
+
+Each of the `--samples` rounds then sends exactly one `eth_blockNumber` request to
+every accepted endpoint, taking available worker slots in input order. The next
+round starts only after every attempt in the current round succeeds or fails,
+including body validation and timeouts. Failures do not remove endpoints from
+later rounds, and no retries or pacing delays are added. If no endpoint passes
+preparation, there are no measured rounds.
+
+A fast endpoint cannot begin its second measured attempt until every accepted
+endpoint finishes its first, and similarly for later rounds. This does **not**
+synchronize requests or provider observations. With concurrency below the accepted endpoint count,
+later endpoints still wait for a slot in each round. A slow endpoint delays the
+next round for everyone; a slow preparation delays the first round. A fast
+endpoint's warmed connection or cache can cool while it waits. There is no
+guarantee of comparable provider state, a current reference, or a trusted head.
+
+JSON retains `schemaVersion: 1` and all existing aggregate field names, types, and
+meanings, and adds the following fields:
+
+| Field | Meaning |
+| --- | --- |
+| `startedAt` | UTC ISO timestamp at run start, after input validation; `generatedAt` remains the report-generation timestamp |
+| `rounds` | Ordered array of `{round, startedMs, finishedMs}` for completed rounds; empty if none were attempted |
+| `results[].observations` | Ordered array with one entry per measured attempt, including failures; empty for failed handshakes and mismatches |
+| Observation `round` | 1-based round number |
+| Observation `startedMs` / `finishedMs` | Client start immediately before invoking RPC / finish after the full response is validated or the failure is classified |
+| Observation `block` / `error` | Exact decimal block string and null error on success; null block and sanitized error category on failure |
+
+All `startedMs` and `finishedMs` values are **elapsed milliseconds from run start**,
+measured with the same monotonic clock and rounded to integers. Round times enclose
+all requests and worker-queue waits in that round. Individual attempt times exclude
+time waiting for a worker, preparation, and preceding rounds. Equal rounded start
+and finish values are possible. The clock is independent of later wall-clock
+adjustments; adding an offset to `startedAt` gives only an approximate UTC time.
+These are client observations, not block timestamps or provider-side execution
+times. Keep using `latencyMs` for the successful-call latency distribution: rounded
+observation windows also include result validation and failure handling.
+
+The table keeps its existing columns in order and appends `Observed (ms)`, plus
+the start timestamp and completed-round count in the summary. Use `--json` for
+per-attempt timing and outcomes; table column positions are for human reading.
+JSON readers should allow these additive fields. Request order and observation
+windows intentionally change from endpoint-at-a-time sampling.
+
+Block remains the maximum of each endpoint's successful **measured** observations
+across all rounds, even if a later block is lower. Lag still compares those maxima
+within the same chain, using the selected reference or peer maximum; it is not a
+per-round or simultaneous head comparison. Warm-up never contributes observations
+or blocks. Partial successes, unusable references, sanitized errors, BigInt
+precision, label order, and exit codes retain their existing rules.
 
 ## Optional warm-up
 
@@ -207,8 +267,8 @@ node bin/rpc-doctor.js --demo --warmup 2 --samples 10 --json
 ```
 
 Each endpoint completes its `eth_chainId` handshake and expected-chain guard
-first, then all warm-up calls, then the requested measured samples. A failed
-handshake or network mismatch skips both block phases. Requests stay sequential
+first, then all warm-up calls; measured rounds wait for all endpoints to finish
+preparation. A failed handshake or network mismatch skips both block phases. Requests stay sequential
 per endpoint under the same concurrency cap and timeout, with the same response
 validation. Request IDs are unique within each benchmark run. Warm-up errors are
 recorded without retries: the remaining warm-up calls and measured samples still
@@ -362,9 +422,10 @@ Response bodies are limited to 1 MiB. Each endpoint receives at most
 Failed or mismatched handshakes stop after one request; later failures do not
 reduce the configured attempt count. Warm-up adds up to `warmup × timeout` ms of
 request waiting per accepted endpoint, plus processing overhead. With concurrency
-`C` and `E` endpoints, up to `ceil(E / C)` groups occupy workers; a conservative
-request-time allowance is `ceil(E / C) × (1 + warmup + samples) × timeout` ms,
-plus scheduling/processing overhead. This is not an enforced whole-run deadline.
+`C` and `E` selected endpoints, a conservative request-time allowance remains
+`ceil(E / C) × (1 + warmup + samples) × timeout` ms, plus scheduling/processing
+overhead. Preparation and each round have their own barrier; actual elapsed time
+depends on the slowest remaining work in each phase. This is not an enforced whole-run deadline.
 Respect your provider's request allowance.
 
 Exit `0`: run completed with at least one usable endpoint (others may be degraded).

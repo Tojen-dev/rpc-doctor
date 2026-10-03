@@ -65,25 +65,31 @@ for (const [concurrency, count, warmup = 0] of [[undefined, 6], [1, 3], [3, 6], 
     const workers = Math.min(concurrency ?? 4, count);
     const labels = Array.from({ length: count }, (_, index) => `Node ${index + 1}`);
     const running = benchmark(rpc.urls, { samples: 2, concurrency, labels, warmup });
-    const initial = [];
-    for (let i = 0; i < workers; i++) initial.push(await rpc.next());
-    assert.ok(initial.every((r) => r.method === 'eth_chainId'));
-    assert.deepEqual(initial.map((r) => r.index).sort((a, b) => a - b), Array.from({ length: workers }, (_, i) => i));
-    // Hold the first endpoint's handshake until all other endpoints finish.
-    // Remaining workers cover handshakes, warm-up, and samples within the same cap.
-    const held = workers > 1 ? initial.splice(initial.findIndex((r) => r.index === 0), 1)[0] : null;
-    const samples = Array(count).fill(0);
-    const completionOrder = [];
-    async function respond(record) {
-      await record.respond();
-      if (record.method === 'eth_blockNumber' && ++samples[record.index] === warmup + 2) completionOrder.push(record.index);
-    }
-    for (const record of initial) await respond(record);
-    const beforeHeld = (count - (held ? 1 : 0)) * (warmup + 3);
-    for (let sent = initial.length; sent < beforeHeld; sent++) await respond(await rpc.next());
-    if (held) {
-      await respond(held);
-      for (let i = 0; i < warmup + 2; i++) await respond(await rpc.next());
+    // Hold the first endpoint in preparation and each measured round. Other
+    // workers must drain this phase without sending any endpoint's next sample.
+    for (const round of [0, 1, 2]) {
+      const callsPerEndpoint = round === 0 ? 1 + warmup : 1;
+      const counts = Array(count).fill(0);
+      const completionOrder = [];
+      const initial = [];
+      for (let i = 0; i < workers; i++) initial.push(await rpc.next());
+      assert.ok(initial.every((r) => r.method === (round === 0 ? 'eth_chainId' : 'eth_blockNumber')));
+      assert.deepEqual(initial.map((r) => r.index).sort((a, b) => a - b), Array.from({ length: workers }, (_, i) => i));
+      const held = workers > 1 ? initial.splice(initial.findIndex((r) => r.index === 0), 1)[0] : null;
+      async function respond(record) {
+        assert.ok(++counts[record.index] <= callsPerEndpoint, 'endpoint must wait for the phase barrier');
+        await record.respond();
+        if (counts[record.index] === callsPerEndpoint) completionOrder.push(record.index);
+      }
+      for (const record of initial) await respond(record);
+      const beforeHeld = (count - (held ? 1 : 0)) * callsPerEndpoint;
+      for (let sent = initial.length; sent < beforeHeld; sent++) await respond(await rpc.next());
+      if (held) {
+        await respond(held);
+        for (let i = 1; i < callsPerEndpoint; i++) await respond(await rpc.next());
+        assert.equal(completionOrder.at(-1), 0);
+      } else assert.deepEqual(completionOrder, Array.from({ length: count }, (_, i) => i));
+      assert.deepEqual(counts, Array(count).fill(callsPerEndpoint));
     }
     const report = await running;
     assert.equal(rpc.peak, workers);
@@ -97,8 +103,7 @@ for (const [concurrency, count, warmup = 0] of [[undefined, 6], [1, 3], [3, 6], 
     assert.deepEqual(report.results.map((r) => r.latestBlock), Array.from({ length: count }, (_, i) => (HEIGHT + BigInt(i)).toString()));
     assert.ok(report.results.every((r) => r.attempts === 2 && r.successes === 2 && Object.keys(r.errors).length === 0));
     if (warmup) assert.ok(report.results.every((r) => r.warmup.attempts === warmup && r.warmup.successes === warmup));
-    if (held) assert.equal(completionOrder.at(-1), 0);
-    else assert.deepEqual(completionOrder, Array.from({ length: count }, (_, i) => i));
+    assertRoundTimes(report);
   });
 }
 
@@ -143,7 +148,30 @@ for (const warmup of [0, 2]) {
     }
     assert.equal(report.results[4].latestBlock, (HEIGHT + 4n).toString());
     assert.equal(JSON.stringify(report).includes('SYNTHETIC_SECRET'), false);
+    assertRoundTimes(report);
+    assert.deepEqual(report.results[0].observations, []);
+    assert.deepEqual(report.results[2].observations, []);
+    assert.deepEqual(report.results[3].observations.map((o) => [o.round, o.error]),
+      [[1, warmup ? null : 'TIMEOUT'], [2, null]]);
   });
+}
+
+function assertRoundTimes(report) {
+  assert.equal(report.rounds.length, report.settings.samples);
+  let previousFinish = 0;
+  for (const boundary of report.rounds) {
+    assert.ok(boundary.startedMs >= previousFinish);
+    assert.ok(boundary.finishedMs >= boundary.startedMs);
+    for (const result of report.results.filter((r) => r.attempts)) {
+      const observation = result.observations[boundary.round - 1];
+      assert.equal(observation.round, boundary.round);
+      assert.ok(observation.startedMs >= boundary.startedMs);
+      assert.ok(observation.finishedMs >= observation.startedMs);
+      assert.ok(observation.finishedMs <= boundary.finishedMs);
+    }
+    previousFinish = boundary.finishedMs;
+  }
+  assert.ok(report.durationMs >= previousFinish);
 }
 
 test('invalid concurrency is rejected before any RPC request', async (t) => {
