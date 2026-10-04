@@ -42,8 +42,8 @@ function hasOnlyKeys(value, keys) {
 
 export async function loadConfig(path, env) {
   const config = await readConfig(path);
-  if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout', 'concurrency', 'lagThreshold', 'reference', 'expectedChain', 'warmup'])) {
-    throw new ConfigError('Config must be an object containing only endpoints, samples, timeout, concurrency, lagThreshold, reference, expectedChain, and warmup.');
+  if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout', 'concurrency', 'lagThreshold', 'reference', 'expectedChain', 'warmup', 'interval'])) {
+    throw new ConfigError('Config must be an object containing only endpoints, samples, timeout, concurrency, lagThreshold, reference, expectedChain, warmup, and interval.');
   }
   const result = {};
   if (Object.hasOwn(config, 'samples')) {
@@ -57,6 +57,12 @@ export async function loadConfig(path, env) {
       throw new ConfigError('Config warmup must be an integer from 0 to 20.');
     }
     result.warmup = config.warmup;
+  }
+  if (Object.hasOwn(config, 'interval')) {
+    if (!Number.isInteger(config.interval) || config.interval < 0 || config.interval > 60000) {
+      throw new ConfigError('Config interval must be an integer from 0 to 60000 ms.');
+    }
+    result.intervalMs = config.interval;
   }
   if (Object.hasOwn(config, 'timeout')) {
     if (!Number.isInteger(config.timeout) || config.timeout < 1 || config.timeout > 60000) {

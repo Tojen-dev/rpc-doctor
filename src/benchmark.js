@@ -96,6 +96,19 @@ async function runPhase(items, concurrency, operation) {
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
 }
 
+async function waitForRound(previousStart, intervalMs) {
+  const started = performance.now();
+  let remaining = previousStart + intervalMs - started;
+  if (remaining <= 0) return 0;
+  do {
+    // Recheck the monotonic deadline after waking; round offsets are rounded
+    // for reporting only and must never shorten the requested interval.
+    await new Promise((resolve) => setTimeout(resolve, Math.ceil(remaining)));
+    remaining = previousStart + intervalMs - performance.now();
+  } while (remaining > 0);
+  return performance.now() - started;
+}
+
 export function addPeerComparison(results, { lagThreshold = 3, reference } = {}) {
   const threshold = BigInt(lagThreshold);
   const groups = new Map();
@@ -144,6 +157,7 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
 
 export async function benchmark(endpoints, {
   samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference, expectedChain, warmup = 0,
+  intervalMs = 0,
 } = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
@@ -153,6 +167,9 @@ export async function benchmark(endpoints, {
   }
   if (!Number.isInteger(warmup) || warmup < 0 || warmup > 20) {
     throw new Error('Warm-up must be an integer from 0 to 20.');
+  }
+  if (!Number.isInteger(intervalMs) || intervalMs < 0 || intervalMs > 60000) {
+    throw new Error('Interval must be an integer from 0 to 60000 ms.');
   }
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) {
     throw new Error('Timeout must be an integer from 1 to 60000 ms.');
@@ -184,8 +201,12 @@ export async function benchmark(endpoints, {
   });
   const accepted = probes.filter((probe) => probe.ready);
   const rounds = [];
+  let previousStart;
+  let pacingWaitMs = 0;
   for (let round = 1; accepted.length > 0 && round <= samples; round++) {
-    const startedMs = elapsedMs();
+    if (round > 1 && intervalMs > 0) pacingWaitMs += await waitForRound(previousStart, intervalMs);
+    previousStart = performance.now();
+    const startedMs = Math.round(previousStart - started);
     await runPhase(accepted, workerCount, (probe) => sampleProbe(probe, round, elapsedMs));
     rounds.push({ round, startedMs, finishedMs: elapsedMs() });
   }
@@ -207,7 +228,9 @@ export async function benchmark(endpoints, {
       ...(reference === undefined ? {} : { reference }),
       ...(expected === undefined ? {} : { expectedChain: expected.toString() }),
       ...(warmup === 0 ? {} : { warmup }),
+      ...(intervalMs === 0 ? {} : { intervalMs }),
     },
+    ...(intervalMs === 0 ? {} : { pacingWaitMs: Math.round(pacingWaitMs) }),
     rounds,
     results: addPeerComparison(probes.map((probe) => probe.result), { lagThreshold, reference }),
   };

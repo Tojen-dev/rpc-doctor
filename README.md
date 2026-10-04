@@ -99,6 +99,7 @@ relative to the current working directory. Start with
     { "label": "Local node", "url": "http://127.0.0.1:8545" }
   ],
   "samples": 10,
+  "interval": 0,
   "timeout": 3000,
   "concurrency": 4,
   "lagThreshold": 3
@@ -119,14 +120,14 @@ the environment, not the file. Labels follow the same sanitization rules as
 in config error messages.
 
 The file must be a regular file of at most 64 KiB. Only `endpoints`, `samples`,
-`timeout`, `concurrency`, `lagThreshold`, `reference`, `expectedChain`, and `warmup` are
+`timeout`, `concurrency`, `lagThreshold`, `reference`, `expectedChain`, `warmup`, and `interval` are
 allowed at the top level; all are optional. A settings-only file such as `{"samples": 10}` works with
 CLI or environment URLs. If present, `endpoints`
 must contain 1–20 entries with distinct HTTP(S) URLs. Unknown fields at either
 level, wrong types, userinfo/fragments, and missing environment references are
 errors. `samples` must be an integer from 1 to 100; `timeout` is an integer from
 1 to 60000 milliseconds; `concurrency` is an integer from 1 to 20; `warmup` is an
-integer from 0 to 20. `lagThreshold`
+integer from 0 to 20; `interval` is an integer from 0 to 60000 milliseconds. `lagThreshold`
 is an integer from 0 to 9007199254740991; `reference` is an integer index from 1 to
 the selected endpoint count. Those settings require JSON numbers. `expectedChain`
 is a string identifier, using the decimal or hex format described below; JSON
@@ -137,6 +138,7 @@ numbers are not accepted for chain IDs, even when they are small.
 | Endpoint list | Positional URLs → config `endpoints` → `RPC_DOCTOR_ENDPOINTS_JSON` |
 | Endpoint names | Explicit `--label` list → selected config endpoint labels → `RPC N` |
 | Samples / timeout | Explicit CLI option → config value → 5 / 5000 ms |
+| Round interval | Explicit `--interval` → config `interval` → 0 ms |
 | Warm-up | Explicit `--warmup` → config `warmup` → 0 |
 | Concurrency | Explicit `--concurrency` → config `concurrency` → 4 |
 | Lag threshold | Explicit `--lag-threshold` → config `lagThreshold` → 3 blocks |
@@ -209,8 +211,9 @@ Each of the `--samples` rounds then sends exactly one `eth_blockNumber` request 
 every accepted endpoint, taking available worker slots in input order. The next
 round starts only after every attempt in the current round succeeds or fails,
 including body validation and timeouts. Failures do not remove endpoints from
-later rounds, and no retries or pacing delays are added. If no endpoint passes
-preparation, there are no measured rounds.
+later rounds, and there are no retries. By default no pacing delay is added;
+`--interval` can require a minimum interval between round starts. If no endpoint
+passes preparation, there are no measured rounds or pacing waits.
 
 A fast endpoint cannot begin its second measured attempt until every accepted
 endpoint finishes its first, and similarly for later rounds. This does **not**
@@ -254,6 +257,54 @@ within the same chain, using the selected reference or peer maximum; it is not a
 per-round or simultaneous head comparison. Warm-up never contributes observations
 or blocks. Partial successes, unusable references, sanitized errors, BigInt
 precision, label order, and exit codes retain their existing rules.
+
+## Interval between rounds
+
+Use `--interval <ms>` or the config number `"interval": ms` to require a minimum
+interval between the **starts of measured rounds**. The value must be a finite,
+non-negative integer from **0 to 60000 milliseconds**, default `0`. CLI takes
+precedence over config; `--interval 0` disables a configured interval. Invalid
+explicit config is still rejected before RPC, even when overridden. The config
+requires a JSON number; CLI values use unsigned decimal digits, without signs,
+whitespace, fractions, or exponent notation.
+
+```sh
+node bin/rpc-doctor.js --demo --samples 3 --interval 100
+node bin/rpc-doctor.js --demo --samples 3 --interval 100 --json
+```
+
+After each round's completion barrier, the next round waits only until the
+previous round's **actual start + interval**. For example, a 100 ms interval with
+a 30 ms round leaves about 70 ms to wait; a 150 ms round needs no extra wait.
+Elapsed time uses the unrounded monotonic clock. Early timer wake-ups recheck the
+deadline; late wake-ups start a later round and its next interval is measured from
+that new actual start. There is no attempt to catch up to an earlier schedule.
+
+There is no interval wait before the first round, after the last round, or when
+all endpoints fail preparation or mismatch the expected chain. A single-round
+run never waits for pacing. Handshakes and warm-up keep their existing scheduling;
+only measured rounds are paced. RPC failures and timeouts still finish their
+attempts and count toward the round's duration. A slow round or worker queue
+therefore consumes the interval before an additional wait is considered.
+
+With a positive interval, JSON adds `settings.intervalMs` and top-level
+`pacingWaitMs`, the total actual time spent in explicit pacing waits, including
+late timer wake-ups, rounded to integer milliseconds. The table adds a summary
+line with the minimum interval and pacing wait; existing columns stay unchanged.
+No pacing fields or summary line are added at zero or when omitted, and
+`schemaVersion` remains `1`.
+
+Pacing is included in whole-run `durationMs` / `Elapsed` and shifts subsequent
+round and observation offsets. The table's first-start to last-finish observation
+window includes those gaps. Individual round/attempt durations start **after**
+their pacing wait, and RPC `latencyMs` never includes it. Warm-up duration, failure
+categories, measured counts, block/lag rules, and exit codes remain unchanged.
+
+An interval is not a per-request rate limit: up to the concurrency cap can start
+together in a round. Endpoints queued within a round can start much later, and
+consecutive calls to an individual endpoint need not be this far apart. Timers
+and slow endpoints can make round spacing longer than requested. This does not
+guarantee synchronized observations, a provider quota, or a whole-run deadline.
 
 ## Optional warm-up
 
@@ -404,6 +455,7 @@ Without the guard, behavior and report fields remain unchanged; `expectedChain`,
 | --- | --- | --- |
 | `--config <file>` | None | Explicit JSON file, at most 64 KiB; incompatible with `--demo` |
 | `--samples <n>` | 5 | 1–100 samples per endpoint |
+| `--interval <ms>` | 0 | 0–60000 ms minimum between measured round starts; no initial/final wait |
 | `--warmup <n>` | 0 | 0–20 unmeasured block calls per endpoint; failures and elapsed ms reported separately |
 | `--timeout <ms>` | 5000 | 1–60000 ms per complete request, including body |
 | `--concurrency <n>` | 4 | 1–20 simultaneous RPC requests; CLI overrides config; works with `--demo` |
@@ -423,8 +475,11 @@ Failed or mismatched handshakes stop after one request; later failures do not
 reduce the configured attempt count. Warm-up adds up to `warmup × timeout` ms of
 request waiting per accepted endpoint, plus processing overhead. With concurrency
 `C` and `E` selected endpoints, a conservative request-time allowance remains
-`ceil(E / C) × (1 + warmup + samples) × timeout` ms, plus scheduling/processing
-overhead. Preparation and each round have their own barrier; actual elapsed time
+`ceil(E / C) × (1 + warmup + samples) × timeout` ms. When planning a paced run,
+allow up to `(samples - 1) × interval` ms of additional deliberate waiting, plus
+timer/scheduling/processing overhead. Long rounds consume some or all of that
+interval, and no accepted endpoints means no pacing waits. Preparation and each
+round have their own barrier; actual elapsed time
 depends on the slowest remaining work in each phase. This is not an enforced whole-run deadline.
 Respect your provider's request allowance.
 

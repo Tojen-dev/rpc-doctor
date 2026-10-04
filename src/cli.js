@@ -16,6 +16,7 @@ Usage:
 Options:
   --config <file>     Read an explicit JSON config (at most 64 KiB; no auto-search)
   --samples <n>       Block-number samples per endpoint, 1–100 (default: 5)
+  --interval <ms>     Minimum interval between round starts, 0–60000 (default: 0)
   --warmup <n>        Unmeasured block-number calls per endpoint, 0–20 (default: 0)
   --timeout <ms>      Timeout per request, 1–60000 (default: 5000)
   --concurrency <n>   Maximum simultaneous RPC requests, 1–20 (default: 4)
@@ -32,7 +33,10 @@ At most 20 endpoints; requests per endpoint stay sequential. No transactions sen
 Concurrency includes handshakes, warm-up, and samples; it also applies to --demo.
 All endpoints finish preparation before sampling begins. Each measured round sends
 one call per accepted endpoint and waits for all outcomes before the next round.
-No pacing delay is added. Slow endpoints delay all peers; observations are not synchronized.
+Interval uses the previous round's actual start, after its completion barrier;
+long rounds need no extra wait. No catch-up, initial wait, or final wait is added.
+Pacing counts in Elapsed and observation offsets, never in RPC latency.
+Slow endpoints delay all peers; observations are not synchronized.
 JSON records round boundaries and each attempt's start/finish in elapsed client ms
 from startedAt; the table shows each endpoint's first-start to last-finish window.
 Warm-up follows the network guard; failures and elapsed ms are reported separately.
@@ -45,7 +49,7 @@ URLs: positional > config endpoints > RPC_DOCTOR_ENDPOINTS_JSON.
 Settings: CLI > config > defaults. --label replaces all selected labels;
 config labels apply only to config URLs, otherwise the default is RPC N.
 Config fields: endpoints [{label, url OR urlEnv}], samples, timeout (ms), concurrency,
-lagThreshold, reference, expectedChain, warmup. Config expectedChain must be a string.
+lagThreshold, reference, expectedChain, warmup, interval (ms). Config expectedChain must be a string.
 Expected chain range: 0–2^256-1; no leading zeros, signs, or whitespace.
 Mismatched endpoints keep their observed ID but receive no block samples.
 Without a reference, lag uses the same-chain peer maximum.
@@ -64,7 +68,7 @@ export async function main(args, env, stdout, stderr) {
     try {
       parsed = parseArgs({ args, allowPositionals: true, strict: true, options: {
         config: { type: 'string' }, samples: { type: 'string' }, timeout: { type: 'string' },
-        concurrency: { type: 'string' }, warmup: { type: 'string' },
+        concurrency: { type: 'string' }, warmup: { type: 'string' }, interval: { type: 'string' },
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
         'expected-chain': { type: 'string' },
         label: { type: 'string', multiple: true },
@@ -88,6 +92,9 @@ export async function main(args, env, stdout, stderr) {
     if (values.warmup !== undefined && (values.warmup.length === 0 || /\D/.test(values.warmup))) {
       throw new Error('Warm-up must be an integer from 0 to 20.');
     }
+    if (values.interval !== undefined && (values.interval.length === 0 || /\D/.test(values.interval))) {
+      throw new Error('Interval must be an integer from 0 to 60000 ms.');
+    }
     if (values['lag-threshold'] !== undefined && (values['lag-threshold'].length === 0 || /\D/.test(values['lag-threshold']))) {
       throw new Error('Lag threshold must be an integer from 0 to 9007199254740991.');
     }
@@ -101,6 +108,7 @@ export async function main(args, env, stdout, stderr) {
     const options = {
       samples: values.samples === undefined ? config.samples ?? 5 : Number(values.samples),
       warmup: values.warmup === undefined ? config.warmup ?? 0 : Number(values.warmup),
+      intervalMs: values.interval === undefined ? config.intervalMs ?? 0 : Number(values.interval),
       timeoutMs: values.timeout === undefined ? config.timeoutMs ?? 5000 : Number(values.timeout),
       concurrency: values.concurrency === undefined ? config.concurrency ?? 4 : Number(values.concurrency),
       lagThreshold: values['lag-threshold'] === undefined ? config.lagThreshold ?? 3 : Number(values['lag-threshold']),
@@ -130,7 +138,7 @@ export async function main(args, env, stdout, stderr) {
     return report.results.some((result) => result.successes > 0) ? 0 : 1;
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
-    const expected = /^(Use |Provide |Samples |Warm-up |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
+    const expected = /^(Use |Provide |Samples |Warm-up |Interval |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
     stderr.write(`RPC Doctor: ${error instanceof ConfigError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }

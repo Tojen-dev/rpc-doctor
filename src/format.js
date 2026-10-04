@@ -32,6 +32,9 @@ export function formatTable(report) {
     ...(hasObservations ? [`Sampling: ${report.rounds.length} completed rounds; each waits for all accepted endpoints.`,
       `Started: ${report.startedAt}. Observed: first request start–last finish, in elapsed client ms.`,
       'Observation windows include failed attempts and waits between rounds; per-attempt times are in --json.'] : []),
+    ...(report.settings.intervalMs > 0
+      ? [`Round interval: ${report.settings.intervalMs}ms minimum between starts · Pacing wait: ${report.pacingWaitMs}ms (included in Elapsed, excluded from RPC latency).`]
+      : []),
     ...(warmed ? [`Warm-up: ${report.settings.warmup} calls per endpoint after the network guard; included in Elapsed.`,
       'Warm-up OK is successes/attempts; warm-up time and errors are separate from measured samples.'] : []),
     `Lag threshold: ${report.settings.lagThreshold} blocks.`,

@@ -4,6 +4,7 @@
     { "label": "Local node", "url": "http://127.0.0.1:8545" }
   ],
   "samples": 10,
+  "interval": 0,
   "timeout": 3000,
   "concurrency": 4,
   "lagThreshold": 3

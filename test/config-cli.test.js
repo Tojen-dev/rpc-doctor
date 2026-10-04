@@ -297,6 +297,57 @@ test('invalid explicit config warm-up cannot be hidden by CLI overrides', async 
   assert.equal(requests, 0);
 });
 
+test('interval uses CLI over config over zero and reports milliseconds without changing columns', async (t) => {
+  const { path } = await fixture(t);
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  for (const [config, flags, interval] of [
+    [{}, [], 0], [{ interval: 0 }, [], 0], [{ interval: 60000 }, [], 60000],
+    [{ interval: 100 }, ['--interval', '1'], 1], [{ interval: 100 }, ['--interval', '0'], 0],
+  ]) {
+    await writeFile(path, JSON.stringify({ endpoints: [{ label: 'Configured node', url: server.url }], ...config }));
+    // A single round must never wait, even at the maximum interval.
+    for (const format of [[], ['--json']]) {
+      requests = 0;
+      const result = await run(['--config', path, '--samples', '1', ...flags, ...format]);
+      assert.equal(result.code, 0, result.err);
+      assert.equal(result.err, '');
+      assert.equal(requests, 2);
+      if (format.length) {
+        const report = JSON.parse(result.out);
+        assert.equal(report.schemaVersion, 1);
+        assert.equal(report.settings.intervalMs, interval || undefined);
+        assert.equal(report.pacingWaitMs, interval ? 0 : undefined);
+        assert.equal(report.results[0].successes, 1);
+      } else {
+        assert.match(result.out, /Endpoint\s+Chain\s+Status\s+OK\s+Median\s+p95\s+Block\s+Lag\s+Observed \(ms\)/);
+        if (interval) assert.ok(result.out.includes(`Round interval: ${interval}ms minimum between starts · Pacing wait: 0ms`));
+        else assert.doesNotMatch(result.out, /Round interval|Pacing wait/);
+      }
+    }
+  }
+});
+
+test('invalid explicit config interval cannot be hidden by a CLI override', async (t) => {
+  const { path } = await fixture(t);
+  let requests = 0;
+  const server = await serve((req, res) => { requests++; reply(res, '0x1'); });
+  t.after(server.close);
+  const contents = [
+    ...[null, '1', false, -1, 0.5, 60001, [], {}, 'SYNTHETIC_SECRET\x1b'].map((interval) => JSON.stringify({ interval })),
+    '{"interval":1e309}', '{"interval":-1e309}',
+  ];
+  for (const content of contents) {
+    await writeFile(path, content);
+    const result = await run(['--config', path, '--interval', '0', server.url]);
+    assert.equal(result.code, 2);
+    assert.equal(result.out, '');
+    assert.equal(result.err, 'RPC Doctor: Config interval must be an integer from 0 to 60000 ms.\n');
+  }
+  assert.equal(requests, 0);
+});
+
 test('explicit config is fully validated even when overridden, before any request, without leaking input', async (t) => {
   const { directory, path } = await fixture(t);
   let requests = 0;
@@ -329,12 +380,13 @@ test('help/version skip config reads and references; demo rejects config before 
   const { directory, path } = await fixture(t);
   await writeFile(path, '{"endpoints":[{"label":"Node","urlEnv":"MISSING_SECRET"}]}');
   for (const file of [path, join(directory, 'missing.json')]) {
-    const help = await run(['--config', file, '--warmup', 'invalid', '--demo', '--help']);
+    const help = await run(['--config', file, '--warmup', 'invalid', '--interval', 'invalid', '--demo', '--help']);
     assert.equal(help.code, 0);
     assert.match(help.out, /--config <file>/);
     assert.match(help.out, /--warmup <n>/);
+    assert.match(help.out, /--interval <ms>/);
     assert.equal(help.err, '');
-    const version = await run(['--config', file, '--warmup', 'invalid', '--version']);
+    const version = await run(['--config', file, '--warmup', 'invalid', '--interval', 'invalid', '--version']);
     assert.equal(version.code, 0);
     assert.equal(version.out, '0.1.0\n');
     assert.equal(version.err, '');
