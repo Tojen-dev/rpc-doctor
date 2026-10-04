@@ -26,7 +26,7 @@ fix it first and record the reason; the exact commit count is a planning target.
 - [x] **11. Explicit warm-up.** Add optional warm-up requests; separate their failures and overhead from measured samples.
 - [x] **12. Sampling rounds.** Sample peers in rounds and record observation times to reduce sequential comparison bias.
 - [x] **13. Inter-sample pacing.** Add a configurable minimum interval with elapsed-time accounting and deterministic timer tests.
-- [ ] **14. Latency variability.** Report standard deviation and p99 with sample-count caveats and independently checked calculations.
+- [x] **14. Latency variability.** Report standard deviation and p99 with sample-count caveats and independently checked calculations.
 - [ ] **15. Strict health exit policy.** Add opt-in failure thresholds suitable for CI while preserving current default exit codes.
 
 ## Portable reports

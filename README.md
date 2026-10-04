@@ -23,10 +23,10 @@ rate-limited. Example output below is synthetic; timings vary by machine.
 ```text
 RPC Doctor · local demo (synthetic endpoints)
 
-Endpoint  Chain  Status    OK   Median  p95     Block  Lag  Observed (ms)
-RPC 1     1      healthy   5/5  7.0ms   7.6ms   256    0    40–199
-RPC 2     1      degraded  5/5  37.6ms  37.9ms  250    6    40–230
-RPC 3     1      degraded  4/5  17.8ms  17.9ms  256    0    40–210
+Endpoint  Chain  Status    OK   Median  p95     Latency n  Stddev  p99     Block  Lag  Observed (ms)
+RPC 1     1      healthy   5/5  7.0ms   7.6ms   5          0.3ms   7.6ms   256    0    40–199
+RPC 2     1      degraded  5/5  37.6ms  37.9ms  5          0.2ms   37.9ms  250    6    40–230
+RPC 3     1      degraded  4/5  17.8ms  17.9ms  4          0.1ms   17.9ms  256    0    40–210
 ```
 
 ## Compare your endpoints
@@ -169,6 +169,9 @@ environment references. Without `--config`, existing CLI behavior is unchanged.
 | OK | Successful block-number samples / attempted samples |
 | Median | Median latency of successful block-number calls |
 | p95 | Nearest-rank 95th percentile of successful calls |
+| Latency n | Number of successful measured calls used for all latency statistics; excludes failures and preparation |
+| Stddev | Population standard deviation in milliseconds, with divisor `n`; null / `—` when `n=0` |
+| p99 | Nearest-rank 99th percentile of successful measured calls; equals max when `0 < n < 100` |
 | Block | Highest block from successful measured samples, stored without integer precision loss |
 | Lag | Non-negative block difference from the same-chain peer maximum, or the explicit reference; unknown when comparison is unavailable |
 | Status | Healthy when samples pass and lag is within the threshold; degraded on partial failure, warm-up errors, larger lag, or unusable reference; unreachable when probing fails; mismatch when the observed network is rejected by the optional guard |
@@ -183,7 +186,7 @@ chain handshake usually establishes the connection before measured samples. Ther
 are no retries. By default, up to four endpoints run concurrently within each
 round; queued endpoints may observe later blocks. Relative lag is approximate, not a synchronized or trusted chain-head
 measurement. A single endpoint, or peers that are all behind, cannot establish freshness.
-Five samples make a quick check, not a statistically robust p95 benchmark.
+Five samples make a quick check, not a statistically robust p95 or p99 benchmark.
 
 Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including
 chain handshakes, optional warm-up, and block samples. Each endpoint's requests remain sequential.
@@ -199,6 +202,45 @@ one at a time, then samples RPC 1, RPC 2, RPC 3 in each round. A limit above the
 extra requests. The table summary and existing JSON `settings.concurrency` field
 report the effective worker count: the smaller of the selected limit and endpoint
 count. `schemaVersion` remains `1`.
+
+## Latency variability and sample size
+
+All latency statistics use only **successful measured `eth_blockNumber` calls**.
+JSON adds `results[].latencySampleCount` (the same count as `successes`),
+`results[].latencyMs.stddev`, `results[].latencyMs.p99`, and top-level
+`latencyNotes`, an array of interpretation notes also printed below the table.
+These are additive fields under `schemaVersion: 1`; `min`, `median`, `p95`, `max`,
+attempts, errors, statuses, and exit codes keep their existing meanings. The table
+inserts `Latency n`, `Stddev`, and `p99` after `p95`.
+
+For raw successful latencies `x1…xn` and their arithmetic mean `mean`, standard
+deviation is `sqrt(sum((xi - mean)^2) / n)`. This is the **population** standard
+deviation of the observed successes, using divisor `n`, with no `n - 1` sample
+correction. It describes this run, not an estimate of provider-wide variability.
+When `n=0`, all latency statistics are JSON `null` and table `—`. When `n=1`,
+standard deviation is `0` and p99 is that one latency; zero deviation does not
+establish stability. Identical samples also give zero deviation.
+
+p99 uses **nearest rank**: sort the unrounded successful latencies, then select
+one-based rank `ceil(0.99 * n)`, without interpolation. For `0 < n < 100`, p99
+is the observed maximum. With 100 successes it is the second-highest value
+(which can equal the maximum when tied). The 100-attempt limit and failures can
+leave very little tail information: short samples cannot reliably estimate tails,
+and even 100 successes do not establish a reliable p99 estimate. Read `Latency n`
+and the failure counts alongside every percentile; a fast successful subset can
+coexist with many failed attempts.
+
+Calculations use the full, unrounded latency values. Only the final statistics
+are rounded to two decimal places in JSON; the table displays them to one decimal
+place. Handshake, warm-up, failed calls, worker waits, and pacing delays never
+enter the latency distribution. Their time still contributes to whole-run elapsed
+time, and failures remain separately visible. Computing these statistics sends no
+additional requests and does not change health or exit-code decisions.
+
+For example, successful latencies `[10, 30, 20, 40]` ms give `latencySampleCount: 4`
+and `latencyMs: {min: 10, median: 25, p95: 40, max: 40, stddev: 11.18, p99: 40}`.
+The population variance is 125 ms². Any other failed attempts are counted in
+`attempts` and `errors`, never included in that four-value distribution.
 
 ## Sampling rounds and observation times
 
@@ -245,7 +287,7 @@ These are client observations, not block timestamps or provider-side execution
 times. Keep using `latencyMs` for the successful-call latency distribution: rounded
 observation windows also include result validation and failure handling.
 
-The table keeps its existing columns in order and appends `Observed (ms)`, plus
+The table ends with `Observed (ms)`, plus
 the start timestamp and completed-round count in the summary. Use `--json` for
 per-attempt timing and outcomes; table column positions are for human reading.
 JSON readers should allow these additive fields. Request order and observation

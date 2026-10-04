@@ -73,7 +73,7 @@ for (const [expectedChain, concurrency] of [[LARGE_ID.toString(), 1], ['0x200000
     assert.equal(mismatch.latestBlock, null);
     assert.equal(mismatch.lagBlocks, null);
     assert.equal(mismatch.peerCount, 0);
-    assert.deepEqual(mismatch.latencyMs, { min: null, median: null, p95: null, max: null });
+    assert.deepEqual(mismatch.latencyMs, { min: null, median: null, p95: null, max: null, stddev: null, p99: null });
     assert.deepEqual(mismatch.errors, {});
     assert.equal(accepted.latestBlock, (2n ** 80n + 1n).toString());
     assert.equal(accepted.peerCount, 0);

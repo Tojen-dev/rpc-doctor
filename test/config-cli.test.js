@@ -321,7 +321,7 @@ test('interval uses CLI over config over zero and reports milliseconds without c
         assert.equal(report.pacingWaitMs, interval ? 0 : undefined);
         assert.equal(report.results[0].successes, 1);
       } else {
-        assert.match(result.out, /Endpoint\s+Chain\s+Status\s+OK\s+Median\s+p95\s+Block\s+Lag\s+Observed \(ms\)/);
+        assert.match(result.out, /Endpoint\s+Chain\s+Status\s+OK\s+Median\s+p95\s+Latency n\s+Stddev\s+p99\s+Block\s+Lag\s+Observed \(ms\)/);
         if (interval) assert.ok(result.out.includes(`Round interval: ${interval}ms minimum between starts · Pacing wait: 0ms`));
         else assert.doesNotMatch(result.out, /Round interval|Pacing wait/);
       }

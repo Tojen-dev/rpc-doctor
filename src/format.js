@@ -7,7 +7,9 @@ export function formatTable(report) {
     reference_unavailable: 'reference unavailable', different_chain: 'different chain', no_data: 'no block data',
     reference_mismatch: 'reference wrong chain', network_mismatch: 'wrong chain',
   };
-  const headers = ['Endpoint', 'Chain', ...(guarded ? ['Network'] : []), 'Status', 'OK', 'Median', 'p95', 'Block', 'Lag'];
+  const hasVariability = report.results.every((r) => r.latencySampleCount !== undefined);
+  const headers = ['Endpoint', 'Chain', ...(guarded ? ['Network'] : []), 'Status', 'OK', 'Median', 'p95',
+    ...(hasVariability ? ['Latency n', 'Stddev', 'p99'] : []), 'Block', 'Lag'];
   if (reference !== undefined) headers.push('Lag check');
   if (warmed) headers.push('Warm-up OK', 'Warm-up elapsed');
   const hasObservations = Array.isArray(report.rounds);
@@ -15,7 +17,9 @@ export function formatTable(report) {
   const ms = (value) => value === null ? '—' : `${value.toFixed(1)}ms`;
   const rows = report.results.map((r) => [
     r.endpoint, r.chainId ?? '—', ...(guarded ? [r.networkStatus] : []), r.status, `${r.successes}/${r.attempts}`,
-    ms(r.latencyMs.median), ms(r.latencyMs.p95), r.latestBlock ?? '—', r.lagBlocks ?? '—',
+    ms(r.latencyMs.median), ms(r.latencyMs.p95),
+    ...(hasVariability ? [String(r.latencySampleCount), ms(r.latencyMs.stddev), ms(r.latencyMs.p99)] : []),
+    r.latestBlock ?? '—', r.lagBlocks ?? '—',
     ...(reference === undefined ? [] : [lagChecks[r.lagStatus] ?? '—']),
     ...(warmed ? [`${r.warmup.successes}/${r.warmup.attempts}`, `${r.warmup.durationMs}ms`] : []),
     ...(hasObservations ? [r.observations.length
@@ -29,6 +33,7 @@ export function formatTable(report) {
     report.demo ? 'RPC Doctor · local demo (synthetic endpoints)' : 'RPC Doctor', '',
     line(headers), line(widths.map((w) => '─'.repeat(w))), ...rows.map(line), '',
     `Samples: ${report.settings.samples} · Timeout: ${report.settings.timeoutMs}ms · Concurrency: ${report.settings.concurrency} · Elapsed: ${report.durationMs}ms`,
+    ...(report.latencyNotes ?? []),
     ...(hasObservations ? [`Sampling: ${report.rounds.length} completed rounds; each waits for all accepted endpoints.`,
       `Started: ${report.startedAt}. Observed: first request start–last finish, in elapsed client ms.`,
       'Observation windows include failed attempts and waits between rounds; per-attempt times are in --json.'] : []),

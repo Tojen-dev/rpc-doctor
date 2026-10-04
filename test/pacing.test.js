@@ -77,13 +77,14 @@ test('pacing waits only for remaining time, handles long failed rounds, and neve
   ]);
   const row = report.results[0];
   assert.deepEqual(row.observations.map((o) => [o.startedMs, o.finishedMs]), [[50, 60], [150, 270], [270, 280], [420, 430], [520, 530]]);
-  assert.deepEqual(row.latencyMs, { min: 10, median: 10, p95: 10, max: 10 });
+  assert.deepEqual(row.latencyMs, { min: 10, median: 10, p95: 10, max: 10, stddev: 0, p99: 10 });
   assert.deepEqual(row.errors, { RPC_ERROR: 1 });
   assert.equal(row.observations[1].error, 'RPC_ERROR');
   assert.equal(row.observations[1].block, null);
   assert.equal(row.status, 'degraded');
   assert.equal(row.attempts, 5);
   assert.equal(row.successes, 4);
+  assert.equal(row.latencySampleCount, 4);
   assert.equal(row.latestBlock, '1');
   assert.equal(row.warmup.durationMs, 30);
   assert.equal(new Set(calls.map((r) => r.id)).size, 7);
@@ -113,7 +114,7 @@ test('fractional monotonic starts and an early wake-up cannot shorten the interv
   assert.equal(clock.fired.length, 2);
   assert.equal(clock.timers.size, 0);
   assert.equal(report.pacingWaitMs, 2);
-  assert.deepEqual(report.results[0].latencyMs, { min: 0.4, median: 0.4, p95: 0.4, max: 0.4 });
+  assert.deepEqual(report.results[0].latencyMs, { min: 0.4, median: 0.4, p95: 0.4, max: 0.4, stddev: 0, p99: 0.4 });
 });
 
 for (const [name, options, rejected] of [
@@ -206,8 +207,9 @@ test('a queued round finishes through timeout before pacing; later rounds keep c
   assert.deepEqual(report.results.map((r) => r.errors), [{ TIMEOUT: 1 }, { RATE_LIMITED: 1 }, {}]);
   assert.deepEqual(report.results.map((r) => r.lagBlocks), [null, '2', '4']);
   assert.equal(report.results[0].latestBlock, height.toString());
+  assert.deepEqual(report.results.map((r) => r.latencySampleCount), [1, 1, 2]);
   assert.deepEqual(report.results[0].observations[0], { round: 1, startedMs: 0, finishedMs: 40, block: null, error: 'TIMEOUT' });
-  assert.deepEqual(report.results[0].latencyMs, { min: 10, median: 10, p95: 10, max: 10 });
+  assert.deepEqual(report.results[0].latencyMs, { min: 10, median: 10, p95: 10, max: 10, stddev: 0, p99: 10 });
   assert.equal(JSON.stringify(report).includes('SYNTHETIC_SECRET'), false);
 });
 

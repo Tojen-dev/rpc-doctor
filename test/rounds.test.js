@@ -105,8 +105,8 @@ test('preparation and every round wait for slow peers with bounded concurrency a
     { round: 2, startedMs: 360, finishedMs: 480 },
     { round: 3, startedMs: 480, finishedMs: 600 },
   ]);
-  assert.deepEqual(report.results[0].latencyMs, { min: 120, median: 120, p95: 120, max: 120 });
-  assert.deepEqual(report.results[1].latencyMs, { min: 10, median: 10, p95: 10, max: 10 });
+  assert.deepEqual(report.results[0].latencyMs, { min: 120, median: 120, p95: 120, max: 120, stddev: 0, p99: 120 });
+  assert.deepEqual(report.results[1].latencyMs, { min: 10, median: 10, p95: 10, max: 10, stddev: 0, p99: 10 });
   assert.equal(report.durationMs, 600);
   assert.ok(Number.isFinite(Date.parse(report.startedAt)));
   assert.ok(Number.isFinite(Date.parse(report.generatedAt)));

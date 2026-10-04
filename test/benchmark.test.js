@@ -4,8 +4,8 @@ import { benchmark, latencyStats, addPeerComparison } from '../src/benchmark.js'
 import { serve, reply } from './helpers.js';
 
 test('calculates interpolated median and nearest-rank p95 from successes', () => {
-  assert.deepEqual(latencyStats([4, 1, 3, 2]), { min: 1, median: 2.5, p95: 4, max: 4 });
-  assert.deepEqual(latencyStats([]), { min: null, median: null, p95: null, max: null });
+  assert.deepEqual(latencyStats([4, 1, 3, 2]), { min: 1, median: 2.5, p95: 4, max: 4, stddev: 1.12, p99: 4 });
+  assert.deepEqual(latencyStats([]), { min: null, median: null, p95: null, max: null, stddev: null, p99: null });
 });
 
 test('never compares heights across networks and keeps single-peer lag unknown', () => {

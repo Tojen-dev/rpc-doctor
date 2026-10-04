@@ -38,9 +38,10 @@ test('warm-up precedes measurements with distinct IDs and separate deterministic
   assert.equal(report.settings.warmup, 2);
   const row = report.results[0];
   assert.deepEqual(row.warmup, { attempts: 2, successes: 1, errors: { RPC_ERROR: 1 }, durationMs: 3000 });
-  assert.deepEqual(row.latencyMs, { min: 10, median: 25, p95: 40, max: 40 });
+  assert.deepEqual(row.latencyMs, { min: 10, median: 25, p95: 40, max: 40, stddev: 11.18, p99: 40 });
   assert.equal(row.attempts, 4);
   assert.equal(row.successes, 4);
+  assert.equal(row.latencySampleCount, 4);
   assert.equal(row.successRate, 100);
   assert.equal(row.latestBlock, '9007199254740993');
   assert.equal(row.status, 'degraded');
@@ -78,7 +79,7 @@ test('zero warm-up preserves default report fields and request count; twenty cal
       reports.push({ ...report, startedAt: '', generatedAt: '', durationMs: 0,
         rounds: report.rounds.map(normalizeTime),
         results: [{ ...row, observations: row.observations.map(normalizeTime),
-          latencyMs: { min: 1, median: 1, p95: 1, max: 1 } }],
+          latencyMs: { min: 1, median: 1, p95: 1, max: 1, stddev: 0, p99: 1 } }],
       });
     }
   }
@@ -218,7 +219,7 @@ test('successful warm-up cannot make failed samples usable for reference compari
     assert.equal(results[0].attempts, 2);
     assert.equal(results[0].successRate, 0);
     assert.deepEqual(results[0].errors, { HTTP_ERROR: 2 });
-    assert.deepEqual(results[0].latencyMs, { min: null, median: null, p95: null, max: null });
+    assert.deepEqual(results[0].latencyMs, { min: null, median: null, p95: null, max: null, stddev: null, p99: null });
     if (results[1]) {
       assert.equal(results[1].lagStatus, 'reference_unavailable');
       assert.equal(results[1].lagBlocks, null);

@@ -2,16 +2,28 @@ import { rpcCall, parseQuantity, validateEndpoint } from './rpc.js';
 import { endpointLabels } from './labels.js';
 import { parseExpectedChain } from './network.js';
 
+const LATENCY_NOTES = [
+  'Latency n counts successful measured calls only; failed attempts remain in Errors.',
+  'Stddev is population standard deviation (divisor n): n=0 is unavailable; n=1 gives 0ms, which does not establish stability.',
+  'Short samples cannot reliably estimate tails. Nearest-rank p99 equals max for 0 < n < 100; even n=100 does not establish a reliable tail estimate.',
+];
+
 export function latencyStats(values) {
-  if (values.length === 0) return { min: null, median: null, p95: null, max: null };
+  if (values.length === 0) return { min: null, median: null, p95: null, max: null, stddev: null, p99: null };
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   const round = (n) => Math.round(n * 100) / 100;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  // Center before squaring to avoid subtracting two large, nearly equal sums.
+  // Use all unrounded successes and the population divisor n, not n - 1.
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
   return {
     min: round(sorted[0]),
     median: round(sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2),
     p95: round(sorted[Math.ceil(sorted.length * 0.95) - 1]),
     max: round(sorted.at(-1)),
+    stddev: round(Math.sqrt(variance)),
+    p99: round(sorted[Math.ceil(sorted.length * 0.99) - 1]),
   };
 }
 
@@ -25,6 +37,7 @@ async function prepareProbe(url, label, { timeoutMs, expectedChain, warmup }, ne
   const result = {
     endpoint: label, chainId: null, latestBlock: null,
     attempts: 0, successes: 0, errors: {}, latencyMs: latencyStats([]),
+    latencySampleCount: 0,
     successRate: 0, lagBlocks: null, peerCount: 0, status: 'unreachable',
     observations: [],
     ...(expectedChain === undefined ? {} : { networkStatus: 'unknown' }),
@@ -212,6 +225,7 @@ export async function benchmark(endpoints, {
   }
   for (const { result, latencies } of accepted) {
     result.latencyMs = latencyStats(latencies);
+    result.latencySampleCount = latencies.length;
     result.successRate = Math.round(result.successes / samples * 10000) / 100;
     result.status = result.successes === samples ? 'healthy' : result.successes > 0 ? 'degraded' : 'unreachable';
     if (result.status === 'healthy' && warmup > 0 && result.warmup.successes < result.warmup.attempts) {
@@ -231,6 +245,7 @@ export async function benchmark(endpoints, {
       ...(intervalMs === 0 ? {} : { intervalMs }),
     },
     ...(intervalMs === 0 ? {} : { pacingWaitMs: Math.round(pacingWaitMs) }),
+    latencyNotes: [...LATENCY_NOTES],
     rounds,
     results: addPeerComparison(probes.map((probe) => probe.result), { lagThreshold, reference }),
   };

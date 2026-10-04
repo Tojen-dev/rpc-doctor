@@ -60,6 +60,10 @@ Unknown fields and missing/empty environment references are errors, even if over
 Exit codes: 0 = at least one usable endpoint; 1 = none usable; 2 = invalid usage/runtime error.
 With expected-chain, only successful block samples on that chain count as usable.
 Warm-up successes never count as usable samples or affect block/lag/latency stats.
+Latency n counts successful measured calls. Stddev uses the population divisor n;
+n=0 is unavailable, n=1 gives 0ms without establishing stability.
+p99 uses nearest rank and equals max for 0 < n < 100. Short samples cannot reliably
+estimate tails; even 100 successes give no reliability guarantee. Failures stay separate.
 `;
 
 export async function main(args, env, stdout, stderr) {
