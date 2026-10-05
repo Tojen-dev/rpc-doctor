@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-05T00:00:00.120Z",
+  "durationMs": 120,
+  "settings": {
+    "samples": 2,
+    "timeoutMs": 1000,
+    "concurrency": 2,
+    "lagThreshold": 3,
+    "reference": 1,
+    "expectedChain": "1",
+    "warmup": 1,
+    "intervalMs": 100
+  },
+  "results": [
+    {
+      "endpoint": "Wrong reference",
+      "chainId": "2",
+      "latestBlock": null,
+      "attempts": 0,
+      "successes": 0,
+      "errors": {},
+      "latencyMs": {
+        "min": null,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "stddev": null,
+        "p99": null
+      },
+      "successRate": 0,
+      "lagBlocks": null,
+      "peerCount": 0,
+      "status": "mismatch",
+      "networkStatus": "mismatch",
+      "lagStatus": "network_mismatch",
+      "warmup": {
+        "attempts": 0,
+        "successes": 0,
+        "errors": {},
+        "durationMs": 0
+      },
+      "latencySampleCount": 0,
+      "observations": []
+    },
+    {
+      "endpoint": "Warm-up and sample errors",
+      "chainId": "1",
+      "latestBlock": "18446744073709551617",
+      "attempts": 2,
+      "successes": 1,
+      "errors": {
+        "RPC_ERROR": 1
+      },
+      "latencyMs": {
+        "min": 10,
+        "median": 10,
+        "p95": 10,
+        "max": 10,
+        "stddev": 0,
+        "p99": 10
+      },
+      "successRate": 50,
+      "lagBlocks": null,
+      "peerCount": 0,
+      "status": "degraded",
+      "networkStatus": "match",
+      "lagStatus": "reference_mismatch",
+      "warmup": {
+        "attempts": 1,
+        "successes": 0,
+        "errors": {
+          "RATE_LIMITED": 1
+        },
+        "durationMs": 5
+      },
+      "latencySampleCount": 1,
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 10,
+          "finishedMs": 20,
+          "block": null,
+          "error": "RPC_ERROR"
+        },
+        {
+          "round": 2,
+          "startedMs": 110,
+          "finishedMs": 120,
+          "block": "18446744073709551617",
+          "error": null
+        }
+      ]
+    }
+  ],
+  "startedAt": "2026-10-05T00:00:00.000Z",
+  "latencyNotes": [
+    "Synthetic fixture: latency statistics use successful measured calls only; short samples do not reliably estimate tails."
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "startedMs": 10,
+      "finishedMs": 20
+    },
+    {
+      "round": 2,
+      "startedMs": 110,
+      "finishedMs": 120
+    }
+  ],
+  "pacingWaitMs": 90,
+  "healthPolicy": {
+    "mode": "strict",
+    "maxFailures": 0,
+    "passed": false,
+    "violations": [
+      {
+        "endpointIndex": 1,
+        "code": "NETWORK_MISMATCH",
+        "message": "Reference rejected by the guard."
+      },
+      {
+        "endpointIndex": 2,
+        "code": "MEASURED_FAILURES",
+        "message": "One failed measured call exceeds zero."
+      },
+      {
+        "endpointIndex": 2,
+        "code": "WARMUP_FAILURES",
+        "message": "One warm-up call failed."
+      },
+      {
+        "endpointIndex": 2,
+        "code": "REFERENCE_MISMATCH",
+        "message": "The selected reference is on the wrong chain."
+      }
+    ],
+    "uncheckedLagEndpoints": [
+      2
+    ],
+    "notes": [
+      "Synthetic fixture: all policy failures stay visible; this is not a live benchmark."
+    ]
+  }
+}

@@ -10,10 +10,15 @@
   "keywords": ["ethereum", "evm", "rpc", "json-rpc", "benchmark", "cli"],
   "engines": { "node": ">=22" },
   "bin": { "rpc-doctor": "bin/rpc-doctor.js" },
-  "files": ["bin", "src", "examples", "README.md", "LICENSE"],
+  "files": ["bin", "src", "examples", "schemas", "README.md", "LICENSE"],
   "scripts": {
     "start": "node bin/rpc-doctor.js",
     "test": "node --test test/*.test.js",
-    "check": "node scripts/check.js"
+    "check": "node scripts/check.js",
+    "test:schema": "node --test test/schema.test.js",
+    "validate:report": "node scripts/validate-report.js"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0"
   }
 }

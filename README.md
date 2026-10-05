@@ -619,6 +619,113 @@ Both completed outcomes print the full report, including failed attempts and pol
 Exit `2`: invalid input or a runtime error.
 Exit `130`: interrupted with Ctrl+C.
 
+## Published JSON report schema
+
+The stable repository and package path is
+[`schemas/report-v1.schema.json`](schemas/report-v1.schema.json). This is a
+**report** schema, not a configuration schema. It declares
+[JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12/json-schema-core)
+and identifies itself with
+[`$id`](https://raw.githubusercontent.com/Tojen-dev/rpc-doctor/main/schemas/report-v1.schema.json).
+All references inside it are local; validation requires no RPC or schema downloads.
+Pin the schema file to a repository commit when reproducible validation matters.
+
+After installing development dependencies in the source checkout:
+
+```sh
+npm ci --ignore-scripts
+node bin/rpc-doctor.js --demo --json > report.json
+npm run validate:report -- report.json
+npm run test:schema
+```
+
+The validation helper returns `0` for a valid report structure, `1` for a schema
+violation, and `2` for unreadable/malformed JSON or a tool/usage error. These are
+**validator** codes, not the benchmark's health result. A benchmark exit `1` still
+writes a complete report that can validate successfully. Keep the benchmark's
+exit code separately when using strict policy in CI:
+
+```sh
+# The synthetic demo normally fails the default strict limits.
+health_exit=0
+node bin/rpc-doctor.js --demo --strict --json > report.json || health_exit=$?
+npm run validate:report -- report.json
+# health_exit contains the benchmark result; validation does not replace it.
+```
+
+The source helper uses pinned [Ajv](https://ajv.js.org/json-schema.html) in strict
+Draft 2020-12 mode, with no coercion, default insertion, or removal of unknown
+fields. Ajv is a **devDependency**: using a complete validator avoids maintaining
+a partial implementation of the standard. Runtime CLI imports and dependencies
+are unchanged. Package consumers can load the shipped schema into their own
+Draft 2020-12 validator; use `ajv/dist/2020.js` with Ajv 8. The source-only helper
+requires development dependencies and is not part of the installed CLI.
+
+### Version 1 compatibility
+
+All report objects allow unknown **additional fields**, which consumers should
+ignore unless understood. Existing fields are still validated even when unknown
+fields are present. The exception is an `errors` map: its keys are the documented
+closed set of error categories and its values must be positive integer counts.
+Status, network/lag status, and strict violation codes are also closed enums.
+Unknown `schemaVersion` values, wrong known-field types, and out-of-bound values
+are rejected. Unknown fields do not weaken the rules on known fields.
+
+The required baseline is `schemaVersion: 1`, `generatedAt`, `durationMs`,
+`settings`, and 1–20 `results`. Settings require `samples`, `timeoutMs`,
+`concurrency`, and `lagThreshold`. Each result requires `endpoint`, `chainId`,
+`latestBlock`, `attempts`, `successes`, `errors`, `latencyMs`, `successRate`,
+`lagBlocks`, `peerCount`, and `status`. Latency objects require `min`, `median`,
+`p95`, and `max`. Required nullable fields must be present with `null` when unknown;
+absence and zero do not substitute for null.
+
+Later additions are optional for compatibility: `startedAt`, `rounds`,
+`observations`, `latencyNotes`, `latencySampleCount`, `stddev`, `p99`, and
+`healthPolicy`. Reference/network/warm-up/pacing fields and `demo` are optional
+because they depend on selected options. **Every known field is checked when
+present**; an optional object still needs its required members. Current output
+omits warm-up/pacing settings at zero; if present, `warmup` and `intervalMs` must
+be positive. `pacingWaitMs` may be zero. `demo`, when present, is `true`.
+
+Independent historical fixtures cover the original CLI (`c3a1358`), the warm-up
+stage (`e1fc349`), and the variability stage (`4c01814`). See
+[fixture descriptions](examples/reports/README.md) for their provenance and exact
+coverage; no blanket compatibility claim is made for every historical revision.
+All fixtures are synthetic, with fixed illustrative timings rather than live
+measurements, and are included in the package with the schema.
+
+Future v1 additions must be optional fields whose absence preserves old meanings.
+Removing/renaming a required field, changing a known field's type, unit, null
+meaning or semantics, changing limits/enums to allow previously invalid values,
+or requiring new fields needs a **new `schemaVersion` and a new schema path**.
+The compatibility schema does not enforce that every latest feature is present;
+consumers that need rounds or strict results must explicitly require them after
+validation. An omitted feature is not proof of either an old producer or success.
+
+### What validation proves
+
+The schema checks structure, required members, types, local numeric bounds, enums,
+and canonical unsigned decimal strings. Chain IDs, blocks, and lags remain exact
+**strings**, including values larger than `Number.MAX_SAFE_INTEGER`; convert to
+`BigInt` only for arithmetic. Nulls are accepted only in documented nullable
+locations. Observed quantities are not limited to machine integer size.
+
+It does **not** prove cross-field consistency: counts versus attempts/settings,
+error sums, success rates or percentiles, nulls versus success counts, block/lag
+arithmetic, chain agreement, option/feature co-occurrence, chronological ordering,
+round counts, endpoint indices versus the actual list length, or `healthPolicy`
+booleans/reasons versus measured results. Expected-chain strings are canonical
+and at most 78 digits; the exact `2^256−1` bound remains a semantic check. Timestamp
+patterns check UTC ISO syntax with milliseconds, not calendar validity. No rounding
+precision or provider observation is certified by schema validation.
+
+A structurally valid report can describe degraded, unreachable, or mismatched
+endpoints, and can contain inconsistent arithmetic if supplied by another producer.
+Validity does not establish health, block freshness, authenticity, or safe text.
+Escape labels/messages for your output context; validation is not sanitization,
+secret detection, or permission to execute content. The CLI's existing redaction
+and health checks remain separate from this consumer-facing structural contract.
+
 ## Development
 
 ```sh

@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-05T00:00:00.030Z",
+  "durationMs": 30,
+  "settings": {
+    "samples": 2,
+    "timeoutMs": 1000,
+    "concurrency": 3,
+    "lagThreshold": 3
+  },
+  "results": [
+    {
+      "endpoint": "Primary",
+      "chainId": "1",
+      "latestBlock": "18446744073709551617",
+      "attempts": 2,
+      "successes": 2,
+      "errors": {},
+      "latencyMs": {
+        "min": 10,
+        "median": 10,
+        "p95": 10,
+        "max": 10,
+        "stddev": 0,
+        "p99": 10
+      },
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 1,
+      "status": "healthy",
+      "latencySampleCount": 2,
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 10,
+          "finishedMs": 20,
+          "block": "18446744073709551617",
+          "error": null
+        },
+        {
+          "round": 2,
+          "startedMs": 20,
+          "finishedMs": 30,
+          "block": "18446744073709551617",
+          "error": null
+        }
+      ]
+    },
+    {
+      "endpoint": "Partial",
+      "chainId": "1",
+      "latestBlock": "18446744073709551612",
+      "attempts": 2,
+      "successes": 1,
+      "errors": {
+        "HTTP_ERROR": 1
+      },
+      "latencyMs": {
+        "min": 10,
+        "median": 10,
+        "p95": 10,
+        "max": 10,
+        "stddev": 0,
+        "p99": 10
+      },
+      "successRate": 50,
+      "lagBlocks": "5",
+      "peerCount": 1,
+      "status": "degraded",
+      "latencySampleCount": 1,
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 10,
+          "finishedMs": 20,
+          "block": null,
+          "error": "HTTP_ERROR"
+        },
+        {
+          "round": 2,
+          "startedMs": 20,
+          "finishedMs": 30,
+          "block": "18446744073709551612",
+          "error": null
+        }
+      ]
+    },
+    {
+      "endpoint": "Other chain",
+      "chainId": "8453",
+      "latestBlock": "18446744073709551617",
+      "attempts": 2,
+      "successes": 2,
+      "errors": {},
+      "latencyMs": {
+        "min": 10,
+        "median": 10,
+        "p95": 10,
+        "max": 10,
+        "stddev": 0,
+        "p99": 10
+      },
+      "successRate": 100,
+      "lagBlocks": null,
+      "peerCount": 0,
+      "status": "healthy",
+      "latencySampleCount": 2,
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 10,
+          "finishedMs": 20,
+          "block": "18446744073709551617",
+          "error": null
+        },
+        {
+          "round": 2,
+          "startedMs": 20,
+          "finishedMs": 30,
+          "block": "18446744073709551617",
+          "error": null
+        }
+      ]
+    }
+  ],
+  "startedAt": "2026-10-05T00:00:00.000Z",
+  "latencyNotes": [
+    "Synthetic fixture: latency statistics use successful measured calls only; short samples do not reliably estimate tails."
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "startedMs": 10,
+      "finishedMs": 20
+    },
+    {
+      "round": 2,
+      "startedMs": 20,
+      "finishedMs": 30
+    }
+  ]
+}

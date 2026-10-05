@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-05T00:00:00.030Z",
+  "durationMs": 30,
+  "settings": {
+    "samples": 2,
+    "timeoutMs": 1000,
+    "concurrency": 2,
+    "lagThreshold": 3
+  },
+  "results": [
+    {
+      "endpoint": "Handshake failed",
+      "chainId": null,
+      "latestBlock": null,
+      "attempts": 0,
+      "successes": 0,
+      "errors": {
+        "INVALID_RESULT": 1
+      },
+      "latencyMs": {
+        "min": null,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "stddev": null,
+        "p99": null
+      },
+      "successRate": 0,
+      "lagBlocks": null,
+      "peerCount": 0,
+      "status": "unreachable",
+      "latencySampleCount": 0,
+      "observations": []
+    },
+    {
+      "endpoint": "Samples failed",
+      "chainId": "1",
+      "latestBlock": null,
+      "attempts": 2,
+      "successes": 0,
+      "errors": {
+        "TIMEOUT": 2
+      },
+      "latencyMs": {
+        "min": null,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "stddev": null,
+        "p99": null
+      },
+      "successRate": 0,
+      "lagBlocks": null,
+      "peerCount": 0,
+      "status": "unreachable",
+      "latencySampleCount": 0,
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 10,
+          "finishedMs": 20,
+          "block": null,
+          "error": "TIMEOUT"
+        },
+        {
+          "round": 2,
+          "startedMs": 20,
+          "finishedMs": 30,
+          "block": null,
+          "error": "TIMEOUT"
+        }
+      ]
+    }
+  ],
+  "startedAt": "2026-10-05T00:00:00.000Z",
+  "latencyNotes": [
+    "Synthetic fixture: latency statistics use successful measured calls only; short samples do not reliably estimate tails."
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "startedMs": 10,
+      "finishedMs": 20
+    },
+    {
+      "round": 2,
+      "startedMs": 20,
+      "finishedMs": 30
+    }
+  ]
+}

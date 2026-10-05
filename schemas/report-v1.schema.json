@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Tojen-dev/rpc-doctor/main/schemas/report-v1.schema.json",
+  "title": "RPC Doctor report, schemaVersion 1",
+  "description": "Structural compatibility schema. Additive fields are allowed; known fields are validated. Validity does not establish health, freshness, safe text, or consistency of computed values.",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "durationMs", "settings", "results"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "generatedAt": { "$ref": "#/$defs/timestamp" },
+    "startedAt": { "$ref": "#/$defs/timestamp" },
+    "durationMs": { "$ref": "#/$defs/elapsedMs" },
+    "settings": { "$ref": "#/$defs/settings" },
+    "results": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/result" } },
+    "demo": { "const": true },
+    "pacingWaitMs": { "$ref": "#/$defs/elapsedMs" },
+    "latencyNotes": { "$ref": "#/$defs/notes" },
+    "rounds": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/round" } },
+    "healthPolicy": { "$ref": "#/$defs/healthPolicy" }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "description": "UTC ISO syntax with milliseconds, as emitted by Date.toISOString. Calendar validity is not asserted.",
+      "pattern": "^(?:[0-9]{4}|[+-][0-9]{6})-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z(?![\\s\\S])"
+    },
+    "decimal": {
+      "type": "string",
+      "description": "Canonical nonnegative decimal integer. No machine-integer size limit; never convert chain/block/lag values to JavaScript Number.",
+      "pattern": "^(?:0|[1-9][0-9]*)(?![\\s\\S])"
+    },
+    "nullableDecimal": { "anyOf": [{ "$ref": "#/$defs/decimal" }, { "type": "null" }] },
+    "elapsedMs": { "type": "integer", "minimum": 0 },
+    "latencyMs": { "type": ["number", "null"], "minimum": 0 },
+    "sampleCount": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "endpointIndex": { "type": "integer", "minimum": 1, "maximum": 20 },
+    "notes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "errorCode": {
+      "enum": ["HTTP_ERROR", "RATE_LIMITED", "RPC_ERROR", "NETWORK_ERROR", "TIMEOUT", "INVALID_RESPONSE", "INVALID_RESULT", "RESPONSE_TOO_LARGE", "UNKNOWN_ERROR"]
+    },
+    "errors": {
+      "type": "object",
+      "description": "Category-to-positive-count map, not an extension object. New categories require a new schemaVersion.",
+      "propertyNames": { "$ref": "#/$defs/errorCode" },
+      "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 100 }
+    },
+    "settings": {
+      "type": "object",
+      "required": ["samples", "timeoutMs", "concurrency", "lagThreshold"],
+      "additionalProperties": true,
+      "properties": {
+        "samples": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "lagThreshold": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "reference": { "$ref": "#/$defs/endpointIndex" },
+        "expectedChain": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
+        "warmup": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "intervalMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      }
+    },
+    "latency": {
+      "type": "object",
+      "required": ["min", "median", "p95", "max"],
+      "additionalProperties": true,
+      "properties": {
+        "min": { "$ref": "#/$defs/latencyMs" },
+        "median": { "$ref": "#/$defs/latencyMs" },
+        "p95": { "$ref": "#/$defs/latencyMs" },
+        "max": { "$ref": "#/$defs/latencyMs" },
+        "stddev": { "$ref": "#/$defs/latencyMs" },
+        "p99": { "$ref": "#/$defs/latencyMs" }
+      }
+    },
+    "warmup": {
+      "type": "object",
+      "required": ["attempts", "successes", "errors", "durationMs"],
+      "additionalProperties": true,
+      "properties": {
+        "attempts": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "successes": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "errors": { "$ref": "#/$defs/errors" },
+        "durationMs": { "$ref": "#/$defs/elapsedMs" }
+      }
+    },
+    "round": {
+      "type": "object",
+      "required": ["round", "startedMs", "finishedMs"],
+      "additionalProperties": true,
+      "properties": {
+        "round": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "startedMs": { "$ref": "#/$defs/elapsedMs" },
+        "finishedMs": { "$ref": "#/$defs/elapsedMs" }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": ["round", "startedMs", "finishedMs", "block", "error"],
+      "additionalProperties": true,
+      "properties": {
+        "round": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "startedMs": { "$ref": "#/$defs/elapsedMs" },
+        "finishedMs": { "$ref": "#/$defs/elapsedMs" },
+        "block": { "$ref": "#/$defs/nullableDecimal" },
+        "error": { "anyOf": [{ "$ref": "#/$defs/errorCode" }, { "type": "null" }] }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": ["endpoint", "chainId", "latestBlock", "attempts", "successes", "errors", "latencyMs", "successRate", "lagBlocks", "peerCount", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "endpoint": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "chainId": { "$ref": "#/$defs/nullableDecimal" },
+        "latestBlock": { "$ref": "#/$defs/nullableDecimal" },
+        "lagBlocks": { "$ref": "#/$defs/nullableDecimal" },
+        "attempts": { "$ref": "#/$defs/sampleCount" },
+        "successes": { "$ref": "#/$defs/sampleCount" },
+        "latencySampleCount": { "$ref": "#/$defs/sampleCount" },
+        "errors": { "$ref": "#/$defs/errors" },
+        "latencyMs": { "$ref": "#/$defs/latency" },
+        "successRate": { "type": "number", "minimum": 0, "maximum": 100 },
+        "peerCount": { "type": "integer", "minimum": 0, "maximum": 19 },
+        "status": { "enum": ["healthy", "degraded", "unreachable", "mismatch"] },
+        "networkStatus": { "enum": ["unknown", "match", "mismatch"] },
+        "lagStatus": { "enum": ["reference", "compared", "ahead", "reference_unavailable", "reference_mismatch", "different_chain", "no_data", "network_mismatch"] },
+        "warmup": { "$ref": "#/$defs/warmup" },
+        "observations": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/observation" } }
+      }
+    },
+    "violation": {
+      "type": "object",
+      "required": ["endpointIndex", "code", "message"],
+      "additionalProperties": true,
+      "properties": {
+        "endpointIndex": { "$ref": "#/$defs/endpointIndex" },
+        "code": { "enum": ["HANDSHAKE_FAILED", "NETWORK_MISMATCH", "NO_MEASURED_SUCCESS", "MEASURED_FAILURES", "WARMUP_FAILURES", "LAG_EXCEEDED", "REFERENCE_UNAVAILABLE", "REFERENCE_MISMATCH", "REFERENCE_DIFFERENT_CHAIN"] },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "healthPolicy": {
+      "type": "object",
+      "required": ["mode", "maxFailures", "passed", "violations", "uncheckedLagEndpoints", "notes"],
+      "additionalProperties": true,
+      "properties": {
+        "mode": { "const": "strict" },
+        "maxFailures": { "$ref": "#/$defs/sampleCount" },
+        "passed": { "type": "boolean" },
+        "violations": { "type": "array", "items": { "$ref": "#/$defs/violation" } },
+        "uncheckedLagEndpoints": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "$ref": "#/$defs/endpointIndex" } },
+        "notes": { "$ref": "#/$defs/notes" }
+      }
+    }
+  }
+}
