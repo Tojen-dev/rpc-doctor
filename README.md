@@ -152,6 +152,10 @@ An unused `RPC_DOCTOR_ENDPOINTS_JSON` is ignored. An explicitly supplied config 
 always fully validated, including environment references and overridden settings,
 before any RPC request. CLI overrides do not hide config errors.
 
+The optional CI flags `--strict` and `--max-failures` are **CLI-only**. Config
+fields named `strict` or `maxFailures` are rejected as unknown, even when the
+corresponding CLI flags are present.
+
 Reference indices always address the **selected** URL list, including when
 positional URLs replace config endpoints. The config reference must also fit that
 list even when `--reference` overrides it. To return to peer-maximum mode, omit
@@ -394,7 +398,8 @@ and lag exclude all warm-up results. The existing `errors` field still includes
 handshake failures. Even a higher warm-up block cannot become a lag baseline, and
 warm-up success alone cannot make a reference usable. Warm-up errors produce
 `degraded` status if any measured samples succeed; no successful measured sample
-means `unreachable`. Exit `0`/`1` still depends only on measured successes.
+means `unreachable`. By default, exit `0`/`1` depends only on measured successes;
+with `--strict`, any warm-up failure also fails the health policy.
 
 At `warmup: 0`, including when the option is omitted, no extra calls or report
 fields/columns are added. The JSON schema version remains `1`. The demo accepts
@@ -440,8 +445,9 @@ column, JSON `settings.reference`, and per-result `lagStatus`; these fields are
 absent without an explicit reference. `peerCount` still counts other usable
 same-chain endpoints, regardless of the chosen baseline. Successful samples,
 latencies, labels, and input order are preserved even when lag cannot be checked.
-Exit codes still depend on usable results: a completed run with usable but degraded
-endpoints still exits `0`; `1` means no endpoints yielded usable block samples.
+Default exit codes depend on usable results: a completed run with usable but
+degraded endpoints exits `0`; `1` means no endpoints yielded usable block samples.
+The optional strict policy below additionally checks failures and observed lag.
 The settings report the selected threshold; reports never include endpoint URLs.
 
 ## Expected network
@@ -484,12 +490,92 @@ matching peers keep their successful measurements but have unknown lag,
 `lagStatus: "reference_mismatch"`, and `degraded` status. If its handshake or all
 block samples fail instead, peers use `reference_unavailable`. There is no fallback.
 
-With the guard enabled, exit `0` means at least one endpoint on the expected chain
-returned a successful block sample, even if others mismatched or failed. Exit `1`
+With the guard enabled and default exit policy, exit `0` means at least one endpoint
+on the expected chain returned a successful block sample, even if others mismatched or failed. Exit `1`
 means none did: all mismatches, all failures, or any mixture of those. This does
 not make a mismatch a network outage. Invalid arguments/config remain exit `2`.
 Without the guard, behavior and report fields remain unchanged; `expectedChain`,
 `networkStatus`, and the `Network` column are absent. `schemaVersion` remains `1`.
+
+## Optional strict health policy for CI
+
+`--strict` evaluates **every selected endpoint** after the entire benchmark. It
+prints the full table or JSON report, then exits `0` if the policy passes or `1`
+if it fails. Without this flag, exit behavior and report fields stay unchanged:
+one successful measured endpoint is enough for exit `0`, regardless of other
+failures. Invalid input or runtime errors remain exit `2`; Ctrl+C remains `130`.
+A failed health check does not write a usage error to stderr.
+
+```sh
+# Demo has a lagging endpoint and partial failures: prints the report, exits 1.
+node bin/rpc-doctor.js --demo --strict --json
+
+# Five measured attempts: allow one failure per endpoint and lag up to six blocks.
+node bin/rpc-doctor.js --demo --strict --samples 5 --max-failures 1 --lag-threshold 6
+```
+
+There is one additional tolerance, **`--max-failures N`**, default `0`. It requires
+`--strict` and accepts unsigned decimal digits representing an integer **0–100**.
+Signs, whitespace, fractions, exponent notation, and non-finite values are
+invalid. The limit is a **count per endpoint**, not a percentage or a pool shared
+between endpoints: `attempts - successes <= N` passes that check, including the
+exact boundary. Handshake and warm-up failures are not measured attempts and
+cannot be allowed by this count. Even `N=100` cannot make an endpoint with zero
+successful measured samples pass. A limit greater than the configured sample
+count is permitted and has the same all-fail safeguard.
+
+The existing `--lag-threshold` supplies the other limit, in **blocks**, also
+inclusive: known lag must be `<= lagThreshold`. Comparisons retain exact integer
+precision. CLI overrides config for that existing setting; its default is 3.
+`--strict` and `--max-failures` themselves are CLI-only, with no config fields.
+All explicit config is still validated even when CLI settings override it.
+
+| Observed outcome | Strict policy |
+| --- | --- |
+| Failed or invalid chain handshake | Fail, even if other endpoints work |
+| Rejected expected network (`mismatch`) | Fail; no block requests are added |
+| No successful measured block samples | Fail, regardless of the allowance or warm-up successes |
+| Partial measured failures | Pass this check only when their count is at most `maxFailures`; status stays `degraded` and errors stay visible |
+| Any warm-up failure | Fail, even if all measured calls succeed |
+| Known lag above / exactly at threshold | Fail / pass this check, respectively |
+| Lone usable endpoint on its chain, without a reference | Unknown lag is **unchecked**, not a policy failure; successful requests cannot prove freshness |
+| Selected reference itself, including a single-endpoint run | Its lag is unchecked; its own request failures still undergo the same policy |
+| Unavailable or mismatched reference | Fail for that reference and affected usable peers; no fallback |
+| Peer on a different chain from the selected reference | Fail; no cross-chain comparison |
+| Peer ahead of a usable reference | Lag remains 0; request checks still apply |
+
+Every applicable check must pass. Thus an allowance can let a `degraded` endpoint
+pass for partial measured failures, but cannot excuse its warm-up errors, excess
+lag, or reference problem. A reference with partial successes retains its observed
+baseline and can pass within the measured-failure allowance. Without an explicit
+reference, separate chains use only their own peers; a lone endpoint on each
+chain has unchecked lag. Use `--expected-chain` when a specific network is required.
+
+**Passing checks RPC outcomes and available relative lag, not trusted freshness.**
+Unknown lag never becomes zero. A chosen reference may itself be stale, and even
+same-chain peers can all be behind. The report explicitly lists unchecked lag;
+the policy does not guarantee current blocks, trust, uptime, or representative
+latency. It does not use rounded success rates or latency percentiles as health
+thresholds and does not change observed statuses, RPC count/order, concurrency,
+warm-up, rounds, pacing, retries, or latency statistics.
+
+Strict reports retain `schemaVersion: 1` and add only top-level `healthPolicy`:
+
+| Field | Meaning |
+| --- | --- |
+| `mode` / `maxFailures` | `"strict"` and the effective measured-failure allowance per endpoint |
+| `passed` | Boolean used for exit `0` / `1` after the complete report is written |
+| `violations` | All failed checks in endpoint order, each with 1-based `endpointIndex`, stable `code`, and safe explanatory `message`; empty on pass |
+| `uncheckedLagEndpoints` | 1-based indices of endpoints with measured successes but null lag, including unusable-reference cases that also have violations |
+| `notes` | Policy definitions and interpretation limits, also printed in the table |
+
+Violation codes are `HANDSHAKE_FAILED`, `NETWORK_MISMATCH`, `NO_MEASURED_SUCCESS`,
+`MEASURED_FAILURES`, `WARMUP_FAILURES`, `LAG_EXCEEDED`, `REFERENCE_UNAVAILABLE`,
+`REFERENCE_MISMATCH`, and `REFERENCE_DIFFERENT_CHAIN`. One endpoint can have multiple
+violations; these are policy checks, not extra RPC errors. The table appends a
+`Strict policy: PASS/FAIL` summary, limits, endpoint-specific reasons, and any
+unchecked lag indices. Endpoint URLs and raw provider messages remain omitted.
+The existing report and error categories remain available in both formats.
 
 ## Options and exit codes
 
@@ -505,6 +591,8 @@ Without the guard, behavior and report fields remain unchanged; `expectedChain`,
 | `--reference <n>` | Peer maximum | 1-based index in selected URL list; same-chain comparisons only, no fallback |
 | `--expected-chain <id>` | None | Decimal or `0x`-hex ID, 0–2^256−1; reject other networks before block samples |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
+| `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
+| `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
 | `--json` | Off | JSON only on stdout; `schemaVersion: 1` |
 | `--demo` | Off | Synthetic local endpoints; ignores environment URLs |
 | `--help`, `-h` | | Usage |
@@ -525,8 +613,9 @@ round have their own barrier; actual elapsed time
 depends on the slowest remaining work in each phase. This is not an enforced whole-run deadline.
 Respect your provider's request allowance.
 
-Exit `0`: run completed with at least one usable endpoint (others may be degraded).
-Exit `1`: no usable block samples (including mismatches when the guard is enabled).
+Exit `0`: by default, at least one usable endpoint; with `--strict`, every policy check passed.
+Exit `1`: by default, no usable block samples; with `--strict`, at least one policy violation.
+Both completed outcomes print the full report, including failed attempts and policy reasons.
 Exit `2`: invalid input or a runtime error.
 Exit `130`: interrupted with Ctrl+C.
 

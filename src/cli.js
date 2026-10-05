@@ -4,6 +4,7 @@ import { benchmark } from './benchmark.js';
 import { runDemo } from './demo.js';
 import { formatTable } from './format.js';
 import { ConfigError, loadConfig } from './config.js';
+import { HealthPolicyError, parseHealthPolicy, evaluateHealthPolicy } from './health-policy.js';
 
 const help = `RPC Doctor — compare EVM JSON-RPC endpoints
 
@@ -23,6 +24,9 @@ Options:
   --lag-threshold <n> Allowed lag in blocks, 0–9007199254740991 (default: 3)
   --reference <n>     Reference endpoint index, starting at 1 in the selected list
   --expected-chain <id> Require a decimal or 0x-hex chain ID (optional)
+  --strict           Exit 1 when any endpoint fails the CI health policy (CLI-only)
+  --max-failures <n>  Allowed failed measured calls per endpoint, 0–100 (default: 0;
+                     requires --strict; CLI-only)
   --label <name>      Repeat once per endpoint, in input order (default: RPC N)
   --json             Write a versioned JSON report
   --demo             Compare three synthetic local endpoints
@@ -57,7 +61,16 @@ An unavailable or different-chain reference leaves lag unknown, with no fallback
 The reference itself is not freshness-checked; endpoints ahead of it have lag 0.
 Unknown fields and missing/empty environment references are errors, even if overridden.
 --demo cannot be combined with --config. Help/version do not read config files.
-Exit codes: 0 = at least one usable endpoint; 1 = none usable; 2 = invalid usage/runtime error.
+Default exit codes: 0 = at least one usable endpoint; 1 = none usable; 2 = invalid usage/runtime error.
+With --strict, every endpoint needs a measured success; failed measured calls must
+be <= --max-failures and known lag <= --lag-threshold (inclusive, in blocks).
+Handshake failures, mismatches, warm-up errors, and unusable/different-chain
+references always fail. Partial measured failures may pass within the limit;
+statuses and errors remain unchanged. The full report is printed before exit 0/1.
+Unknown lag for a lone same-chain endpoint or the reference itself is unchecked,
+not a failure. Passing does not establish freshness, trust, or uptime.
+Strict flags are CLI-only; config validation/precedence stays unchanged.
+Invalid input/runtime errors remain exit 2; Ctrl+C remains exit 130.
 With expected-chain, only successful block samples on that chain count as usable.
 Warm-up successes never count as usable samples or affect block/lag/latency stats.
 Latency n counts successful measured calls. Stddev uses the population divisor n;
@@ -75,6 +88,7 @@ export async function main(args, env, stdout, stderr) {
         concurrency: { type: 'string' }, warmup: { type: 'string' }, interval: { type: 'string' },
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
         'expected-chain': { type: 'string' },
+        strict: { type: 'boolean' }, 'max-failures': { type: 'string' },
         label: { type: 'string', multiple: true },
         json: { type: 'boolean' }, demo: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
@@ -87,6 +101,7 @@ export async function main(args, env, stdout, stderr) {
       stdout.write(`${pkg.version}\n`);
       return 0;
     }
+    const healthOptions = parseHealthPolicy({ strict: values.strict, maxFailures: values['max-failures'] });
     if ([values.samples, values.timeout].some((value) => value !== undefined && !/^\d+$/.test(value))) {
       throw new Error('Samples and timeout must be positive integers.');
     }
@@ -138,12 +153,14 @@ export async function main(args, env, stdout, stderr) {
       throw new ConfigError('Config reference exceeds the selected endpoint count.');
     }
     const report = values.demo ? await runDemo(options) : await benchmark(endpoints, options);
+    if (healthOptions) report.healthPolicy = evaluateHealthPolicy(report, healthOptions);
     stdout.write((values.json ? JSON.stringify(report, null, 2) : formatTable(report)) + '\n');
+    if (healthOptions) return report.healthPolicy.passed ? 0 : 1;
     return report.results.some((result) => result.successes > 0) ? 0 : 1;
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
     const expected = /^(Use |Provide |Samples |Warm-up |Interval |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
-    stderr.write(`RPC Doctor: ${error instanceof ConfigError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
+    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }
 }

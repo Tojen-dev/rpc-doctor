@@ -52,5 +52,12 @@ export function formatTable(report) {
     'Endpoint labels follow input order. URLs are omitted to protect API keys.',
     ...(errors.length ? ['', 'Errors:', ...errors] : []),
     ...(warmupErrors.length ? ['', 'Warm-up errors:', ...warmupErrors] : []),
+    ...(report.healthPolicy ? ['',
+      `Strict policy: ${report.healthPolicy.passed ? 'PASS' : 'FAIL'} · Max failed measured calls per endpoint: ${report.healthPolicy.maxFailures} · Lag limit: ${report.settings.lagThreshold} blocks`,
+      ...report.healthPolicy.violations.map((v) => `  Endpoint ${v.endpointIndex} (${report.results[v.endpointIndex - 1].endpoint}): ${v.code} — ${v.message}`),
+      ...(report.healthPolicy.uncheckedLagEndpoints.length
+        ? [`Unchecked lag: endpoint indices ${report.healthPolicy.uncheckedLagEndpoints.join(', ')}.`] : []),
+      ...report.healthPolicy.notes,
+    ] : []),
   ].join('\n');
 }
