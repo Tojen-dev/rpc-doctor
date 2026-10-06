@@ -5,6 +5,7 @@ import { csvCell, formatCsv } from '../src/csv.js';
 import { main } from '../src/cli.js';
 import { parseCsv } from './csv-parser.js';
 import { serve } from './helpers.js';
+import { compareMarkdownReport } from './markdown-output.js';
 
 // Independent public contract, not imported from the formatter's column table.
 const HEADER = '"endpoint_index","endpoint","chain_id","status","network_status","attempts","successes","success_rate_pct","latency_sample_count","latency_min_ms","latency_median_ms","latency_p95_ms","latency_p99_ms","latency_max_ms","latency_stddev_ms","latest_block","lag_blocks","peer_count","handshake_errors","sample_errors","warmup_attempts","warmup_successes","warmup_duration_ms","warmup_errors","reference_index","lag_status","expected_chain","lag_threshold_blocks","samples","timeout_ms","concurrency","warmup_requested","interval_ms","pacing_wait_ms","started_at","generated_at","duration_ms","demo","strict_passed","strict_max_failures","strict_violations","strict_lag_check"';
@@ -122,13 +123,16 @@ for (const [name, plans, flags, statuses, expectedCode] of [
   ['mismatch', [{ chain: '0x2' }], ['--expected-chain', '1'], ['mismatch'], 1],
   ['enabled warm-up skipped by mismatch', [{ chain: '0x2' }], ['--expected-chain', '1', '--warmup', '2', '--strict'], ['mismatch'], 1],
   ['unavailable reference', [{ chain: null }, {}], ['--reference', '1', '--strict'], ['unreachable', 'degraded'], 1],
+  ['mismatched reference', [{ chain: '0x2' }, {}], ['--reference', '1', '--expected-chain', '1', '--strict'], ['mismatch', 'degraded'], 1],
+  ['different-chain reference', [{}, { chain: '0x2' }], ['--reference', '1', '--strict'], ['healthy', 'degraded'], 1],
+  ['ahead of reference', [{ blocks: ['0x1', '0x1'] }, {}], ['--reference', '1', '--strict'], ['healthy', 'healthy'], 0],
   ['warm-up errors', [{ blocks: [null, big, big] }], ['--warmup', '1', '--strict'], ['degraded'], 1],
   ['strict pass with partial failure', [{ blocks: [null, big] }], ['--strict', '--max-failures', '1'], ['degraded'], 0],
   ['usable reference strict pass', [{}, {}], ['--reference', '1', '--strict'], ['healthy', 'healthy'], 0],
   ['strict fail despite usable data', [{ blocks: [null, big] }], ['--strict'], ['degraded'], 1],
   ['positive and zero wait', [{}], ['--interval', '1', '--warmup', '0'], ['healthy'], 0],
 ]) {
-  test(`CSV CLI matches the same JSON fake-run: ${name}`, async (t) => {
+  test(`CSV and Markdown CLI match the same JSON fake-run: ${name}`, async (t) => {
     let now = 0; let indices; let calls;
     t.mock.method(performance, 'now', () => now);
     t.mock.method(globalThis, 'fetch', async (url, options) => {
@@ -144,7 +148,7 @@ for (const [name, plans, flags, statuses, expectedCode] of [
     });
     const env = { RPC_DOCTOR_ENDPOINTS_JSON: JSON.stringify(plans.map((_, i) => `http://127.0.0.1/${i}?key=SYNTHETIC_SECRET`)) };
     const runs = [];
-    for (const format of ['--json', '--csv']) {
+    for (const format of ['--json', '--csv', '--markdown']) {
       now = 0; indices = plans.map(() => 0); calls = [];
       const result = await run(['--samples', '2', '--concurrency', '2', ...flags, format], env);
       assert.equal(result.code, expectedCode, result.err);
@@ -153,7 +157,9 @@ for (const [name, plans, flags, statuses, expectedCode] of [
       runs.push({ ...result, calls });
     }
     assert.deepEqual(runs[0].calls, runs[1].calls);
+    assert.deepEqual(runs[0].calls, runs[2].calls);
     const report = JSON.parse(runs[0].out);
+    compareMarkdownReport(runs[2].out, report);
     const rows = records(runs[1].out);
     assert.equal(rows.length, plans.length);
     assert.deepEqual(rows.map(r => r.status), statuses);
@@ -195,7 +201,7 @@ test('CLI normalizes newline/control labels before escaping Unicode, commas, quo
   }
 });
 
-test('CSV preserves nonzero pacing, warm-up, concurrency and aggregate timings from the same fake run', async (t) => {
+test('CSV and Markdown preserve nonzero pacing, warm-up, concurrency and aggregate timings from the same fake run', async (t) => {
   let now = 0; let calls = []; let nextTimer = 0;
   const timers = new Map();
   t.mock.method(performance, 'now', () => now);
@@ -208,7 +214,7 @@ test('CSV preserves nonzero pacing, warm-up, concurrency and aggregate timings f
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: big }));
   });
   const outputs = []; const requests = [];
-  for (const format of ['--json', '--csv']) {
+  for (const format of ['--json', '--csv', '--markdown']) {
     now = 0; calls = [];
     const running = run([format, '--samples', '2', '--warmup', '1', '--concurrency', '1', '--interval', '100', '--strict', 'http://127.0.0.1/first', 'http://127.0.0.1/second']);
     await new Promise(resolve => setImmediate(resolve));
@@ -220,8 +226,10 @@ test('CSV preserves nonzero pacing, warm-up, concurrency and aggregate timings f
     outputs.push(result.out); requests.push(calls);
   }
   assert.deepEqual(requests[0], requests[1]);
+  assert.deepEqual(requests[0], requests[2]);
   assert.equal(requests[0].length, 8);
   const report = JSON.parse(outputs[0]);
+  compareMarkdownReport(outputs[2], report);
   assert.equal(report.pacingWaitMs, 80);
   assert.equal(report.durationMs, 160);
   for (const row of records(outputs[1])) {

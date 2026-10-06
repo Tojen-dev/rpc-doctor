@@ -19,6 +19,7 @@
     "validate:report": "node scripts/validate-report.js"
   },
   "devDependencies": {
-    "ajv": "8.20.0"
+    "ajv": "8.20.0",
+    "marked": "18.1.0"
   }
 }

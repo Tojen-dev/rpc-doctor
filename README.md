@@ -593,8 +593,9 @@ The existing report and error categories remain available in both formats.
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
 | `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
-| `--json` | Off | JSON only on stdout; `schemaVersion: 1`; conflicts with `--csv` |
-| `--csv` | Off | CLI-only: fixed-column endpoint CSV; conflicts with `--json` |
+| `--json` | Off | JSON only on stdout; `schemaVersion: 1`; conflicts with `--csv`/`--markdown` |
+| `--csv` | Off | CLI-only: fixed-column endpoint CSV; conflicts with `--json`/`--markdown` |
+| `--markdown` | Off | CLI-only: shareable Markdown report; conflicts with `--json`/`--csv` |
 | `--demo` | Off | Synthetic local endpoints; ignores environment URLs |
 | `--help`, `-h` | | Usage |
 | `--version`, `-v` | | Version |
@@ -757,6 +758,90 @@ handle or remove prefixes differently. Do not remove protection before opening
 untrusted labels in a spreadsheet. The protection is not a general secret detector
 or sanitizer for other contexts. See [OWASP's CSV injection guidance](https://owasp.org/www-community/attacks/CSV_Injection)
 for spreadsheet-specific limitations.
+
+## Markdown report
+
+Use the CLI-only `--markdown` flag for a standalone report suitable for a GFM
+(GitHub Flavored Markdown) viewer. Save stdout with shell redirection:
+
+```sh
+node bin/rpc-doctor.js --demo --markdown > report.md
+# Read private endpoints from RPC_DOCTOR_ENDPOINTS_JSON as above.
+node bin/rpc-doctor.js --samples 10 --warmup 1 --markdown > report.md
+
+# Preserve the health exit code while saving the complete report.
+health_exit=0
+node bin/rpc-doctor.js --demo --strict --markdown > report.md || health_exit=$?
+```
+
+`--markdown`, `--csv`, and `--json` are mutually exclusive in any order. Conflicts
+return exit `2` before config or endpoint environment reads and before RPC calls,
+including when combined with help/version. Otherwise `--markdown --help` and
+`--markdown --version` exit early without reading config or contacting endpoints.
+There is no `markdown` config field. No output-path option is provided; shell
+redirection creates/truncates its destination before the CLI runs, including when
+the CLI later rejects invalid input.
+
+The formatter uses the completed, sanitized in-memory report. It adds no requests,
+retries, measurements, or health decisions. Default table output, JSON schema
+version 1, CSV columns, concurrency, pacing, statistics, and exit policy are
+unchanged. Completed runs print the full report on exit `0` or `1`, including
+all-failed runs and strict failures. Invalid usage/runtime errors remain exit `2`
+with safe stderr and no fabricated report; Ctrl+C remains exit `130` without a
+partial Markdown report.
+
+The report includes:
+
+- Actual UTC start/generation timestamps, elapsed milliseconds, a synthetic-demo
+  marker, requested samples, per-request timeout, and effective concurrency.
+- Handshake, expected-chain guard, warm-up and measured-round semantics; configured
+  pacing and actual wait; round boundaries and each endpoint's observation window.
+- Input-ordered endpoints, exact decimal chain/block/lag values, measured
+  successes/attempts, success rate, status, network guard, peers, and lag checks.
+- Successful measured latency n/min/median/p95/p99/max/population stddev, with
+  short-sample limitations and all measurement exclusions explained.
+- Separate sanitized handshake, sample, and warm-up error category/count summaries,
+  including warm-up attempts/successes and elapsed time. Partial failures stay visible.
+- Expected chain, lag threshold and reference policy, with unavailable references,
+  self-reference, different chains and unknown lag distinguished. Relative agreement
+  does not prove freshness, trust, or uptime.
+- Strict PASS/FAIL, inclusive maximum failures and lag limits, every violation
+  code/message, and all endpoints whose lag remains unchecked. Disabled strict
+  mode has no PASS/FAIL decision.
+
+An em dash (`—`) means unknown/unavailable, while `Disabled` means the feature was
+not enabled. Actual zero values remain zero. Warm-up `0/0` with zero elapsed time
+means enabled but skipped; `None` errors means no recorded errors, including in
+skipped phases, and does not imply success. Endpoint windows include failed
+attempts and waits between rounds, and use elapsed client time rather than provider
+timestamps. Measurements are not synchronized. Full per-attempt blocks, errors,
+and timing details remain available in JSON. Markdown is a human report, not a
+versioned machine schema; use JSON or CSV for programmatic consumption.
+
+### Text escaping and sharing
+
+Every dynamic text field (including labels, notes, statuses and diagnostics) uses
+one plain-text escape function. Controls, format characters and line separators
+become spaces; whitespace collapses and is trimmed, matching existing label
+normalization. Unicode text is retained. ASCII punctuation becomes character
+references (`&amp;` for ampersands, numeric references for other punctuation).
+This protects pipes, backticks, backslashes, brackets, parentheses, HTML syntax,
+links/images, headings/lists and bare URL/email autolinks without altering the
+displayed normalized label. Literal entity-like labels such as `&lt;` remain
+literal text. Raw Markdown contains escapes that a GFM renderer displays as the
+original punctuation; avoid decoding entities before parsing the Markdown.
+
+The approach follows GFM's [character-reference rules](https://github.github.com/gfm/#entity-and-numeric-character-references).
+Tests use pinned [Marked](https://marked.js.org/using_advanced#options) with GFM
+enabled to check displayed text, table structure and the absence of active links,
+images or HTML. Marked is a **development-only** dependency; the CLI remains free
+of runtime dependencies. Other renderers and services can add their own processing,
+so preview the destination's rendering when sharing.
+
+The projection omits endpoint URLs, headers, raw provider messages and arbitrary
+extra report properties. Public labels still need care: escaping prevents markup
+interpretation, not disclosure of secrets someone puts in a label. Reports also
+contain public measurement results and run timestamps.
 
 ## Published JSON report schema
 

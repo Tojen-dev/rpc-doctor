@@ -4,6 +4,7 @@ import { benchmark } from './benchmark.js';
 import { runDemo } from './demo.js';
 import { formatTable } from './format.js';
 import { formatCsv } from './csv.js';
+import { formatMarkdown } from './markdown.js';
 import { ConfigError, loadConfig } from './config.js';
 import { HealthPolicyError, parseHealthPolicy, evaluateHealthPolicy } from './health-policy.js';
 
@@ -30,7 +31,8 @@ Options:
                      requires --strict; CLI-only)
   --label <name>      Repeat once per endpoint, in input order (default: RPC N)
   --json             Write a versioned JSON report
-  --csv              Write endpoint aggregates as CSV (CLI-only; conflicts with --json)
+  --csv              Write endpoint aggregates as CSV (CLI-only)
+  --markdown         Write a shareable Markdown report (CLI-only)
   --demo             Compare three synthetic local endpoints
   --help, -h         Show help
   --version, -v      Show version
@@ -51,6 +53,11 @@ Use environment input for API-key URLs to avoid storing them in shell history.
 Labels also name environment URLs; with --demo, supply three labels or none.
 Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
 Control characters become spaces; whitespace is collapsed and trimmed.
+--json, --csv, and --markdown are mutually exclusive, including with help/version.
+Markdown includes measurement conditions, phase errors, timings and strict reasons.
+Dynamic Markdown text is escaped, including HTML and bare URL/email autolinks.
+An em dash means unknown; Disabled is not PASS. Use JSON for per-attempt details.
+Redirect stdout to save a report; a completed report is written even on exit 1.
 CSV has one header and one row per endpoint, UTF-8, quoted fields, and CRLF lines.
 Empty cells mean unknown/absent, not zero. Errors are JSON category/count objects;
 warm-up and strict fields are empty when disabled. Strict failure still writes CSV.
@@ -98,12 +105,13 @@ export async function main(args, env, stdout, stderr) {
         'expected-chain': { type: 'string' },
         strict: { type: 'boolean' }, 'max-failures': { type: 'string' },
         label: { type: 'string', multiple: true },
-        json: { type: 'boolean' }, csv: { type: 'boolean' }, demo: { type: 'boolean' },
+        json: { type: 'boolean' }, csv: { type: 'boolean' }, markdown: { type: 'boolean' }, demo: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       } });
     } catch { throw new Error('Invalid arguments. Use --help for available options.'); }
     const { values, positionals } = parsed;
     if (values.csv && values.json) throw new Error('Use either --csv or --json, not both.');
+    if (values.markdown && (values.csv || values.json)) throw new Error('Use --markdown without --json or --csv.');
     if (values.help) { stdout.write(help); return 0; }
     if (values.version) {
       const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -164,6 +172,7 @@ export async function main(args, env, stdout, stderr) {
     const report = values.demo ? await runDemo(options) : await benchmark(endpoints, options);
     if (healthOptions) report.healthPolicy = evaluateHealthPolicy(report, healthOptions);
     const output = values.csv ? formatCsv(report)
+      : values.markdown ? formatMarkdown(report)
       : (values.json ? JSON.stringify(report, null, 2) : formatTable(report)) + '\n';
     stdout.write(output);
     if (healthOptions) return report.healthPolicy.passed ? 0 : 1;
