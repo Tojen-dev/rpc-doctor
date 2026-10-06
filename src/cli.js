@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { benchmark } from './benchmark.js';
 import { runDemo } from './demo.js';
 import { formatTable } from './format.js';
+import { formatCsv } from './csv.js';
 import { ConfigError, loadConfig } from './config.js';
 import { HealthPolicyError, parseHealthPolicy, evaluateHealthPolicy } from './health-policy.js';
 
@@ -29,6 +30,7 @@ Options:
                      requires --strict; CLI-only)
   --label <name>      Repeat once per endpoint, in input order (default: RPC N)
   --json             Write a versioned JSON report
+  --csv              Write endpoint aggregates as CSV (CLI-only; conflicts with --json)
   --demo             Compare three synthetic local endpoints
   --help, -h         Show help
   --version, -v      Show version
@@ -49,6 +51,12 @@ Use environment input for API-key URLs to avoid storing them in shell history.
 Labels also name environment URLs; with --demo, supply three labels or none.
 Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
 Control characters become spaces; whitespace is collapsed and trimmed.
+CSV has one header and one row per endpoint, UTF-8, quoted fields, and CRLF lines.
+Empty cells mean unknown/absent, not zero. Errors are JSON category/count objects;
+warm-up and strict fields are empty when disabled. Strict failure still writes CSV.
+Dangerous text prefixes receive an apostrophe; CSV quoting alone is not formula protection.
+Import identifiers/blocks/lags as text to retain exact digits. Spreadsheet auto-detection
+and save/reopen behavior vary. See README for column order and import limitations.
 URLs: positional > config endpoints > RPC_DOCTOR_ENDPOINTS_JSON.
 Settings: CLI > config > defaults. --label replaces all selected labels;
 config labels apply only to config URLs, otherwise the default is RPC N.
@@ -90,11 +98,12 @@ export async function main(args, env, stdout, stderr) {
         'expected-chain': { type: 'string' },
         strict: { type: 'boolean' }, 'max-failures': { type: 'string' },
         label: { type: 'string', multiple: true },
-        json: { type: 'boolean' }, demo: { type: 'boolean' },
+        json: { type: 'boolean' }, csv: { type: 'boolean' }, demo: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       } });
     } catch { throw new Error('Invalid arguments. Use --help for available options.'); }
     const { values, positionals } = parsed;
+    if (values.csv && values.json) throw new Error('Use either --csv or --json, not both.');
     if (values.help) { stdout.write(help); return 0; }
     if (values.version) {
       const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -154,7 +163,9 @@ export async function main(args, env, stdout, stderr) {
     }
     const report = values.demo ? await runDemo(options) : await benchmark(endpoints, options);
     if (healthOptions) report.healthPolicy = evaluateHealthPolicy(report, healthOptions);
-    stdout.write((values.json ? JSON.stringify(report, null, 2) : formatTable(report)) + '\n');
+    const output = values.csv ? formatCsv(report)
+      : (values.json ? JSON.stringify(report, null, 2) : formatTable(report)) + '\n';
+    stdout.write(output);
     if (healthOptions) return report.healthPolicy.passed ? 0 : 1;
     return report.results.some((result) => result.successes > 0) ? 0 : 1;
   } catch (error) {

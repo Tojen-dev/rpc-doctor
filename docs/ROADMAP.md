@@ -32,7 +32,7 @@ fix it first and record the reason; the exact commit count is a planning target.
 ## Portable reports
 
 - [x] **16. Published JSON schema.** Ship a schema, report fixtures, and compatibility checks for success, mixed-chain, and failure cases.
-- [ ] **17. CSV export.** Emit escaped CSV with documented columns, null handling, and spreadsheet formula-injection protection.
+- [x] **17. CSV export.** Emit escaped CSV with documented columns, null handling, and spreadsheet formula-injection protection.
 - [ ] **18. Markdown report.** Produce a shareable report with escaped labels and an explicit measurement summary.
 - [ ] **19. Atomic report files.** Add output-path support with safe overwrite semantics and no half-written reports on failure.
 

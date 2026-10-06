@@ -6,7 +6,7 @@
 **Which RPC is fast, which is falling behind, and which is failing?**
 
 RPC Doctor compares EVM JSON-RPC endpoints from your machine and produces a readable
-table or a JSON report. Zero runtime dependencies. No wallet, API key, or internet
+table, a JSON report, or CSV. Zero runtime dependencies. No wallet, API key, or internet
 connection is needed for the demo. Requires **Node.js 22+**.
 
 ## Try it
@@ -593,7 +593,8 @@ The existing report and error categories remain available in both formats.
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
 | `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
-| `--json` | Off | JSON only on stdout; `schemaVersion: 1` |
+| `--json` | Off | JSON only on stdout; `schemaVersion: 1`; conflicts with `--csv` |
+| `--csv` | Off | CLI-only: fixed-column endpoint CSV; conflicts with `--json` |
 | `--demo` | Off | Synthetic local endpoints; ignores environment URLs |
 | `--help`, `-h` | | Usage |
 | `--version`, `-v` | | Version |
@@ -618,6 +619,144 @@ Exit `1`: by default, no usable block samples; with `--strict`, at least one pol
 Both completed outcomes print the full report, including failed attempts and policy reasons.
 Exit `2`: invalid input or a runtime error.
 Exit `130`: interrupted with Ctrl+C.
+
+## CSV export
+
+Use the CLI-only `--csv` flag to export one aggregate row per endpoint, in input
+order. `--csv` and `--json` conflict in either order, before config reads or RPC;
+the conflict also takes precedence over help/version. Otherwise `--csv --help`
+and `--csv --version` retain their early, network-free behavior. There is no
+config field for choosing CSV. The default remains the table.
+
+```sh
+node bin/rpc-doctor.js --demo --csv > report.csv
+# With RPC_DOCTOR_ENDPOINTS_JSON already set:
+node bin/rpc-doctor.js --samples 10 --csv > report.csv
+```
+
+CSV changes output only. Requests, calculations, statuses, strict policy, and exit
+codes remain the same. Default all-failure and strict-failure runs still print the
+complete CSV before exit `1`. Input/runtime errors exit `2` with a safe diagnostic
+on stderr and no fabricated CSV report; Ctrl+C remains `130`. Preserve the command's
+exit code in CI rather than inferring success from a readable CSV file.
+
+The byte format is UTF-8 without a BOM, comma-separated, with one header and **42
+fields in every record**. Every field is double-quoted; embedded quotes are doubled,
+and embedded CR/LF remain inside the quoted field. Records end with CRLF, including
+the final record, with no extra blank record. The CSV follows the quoting and record
+conventions in [RFC 4180](https://www.rfc-editor.org/rfc/rfc4180). No banner, commentary,
+error footer, or `sep=` line is inserted into stdout. CLI labels still undergo the
+existing whitespace/control normalization before CSV formatting, so a newline in
+a supplied label becomes a space.
+
+### Columns, in fixed order
+
+Names and positions below are the CSV contract. Consumers should select by header
+name. Run-level settings/metadata repeat on each endpoint row. Numeric values use
+dot decimals without units or percent signs; latency statistics retain JSON's
+precision instead of the table's one-decimal display.
+
+| # | Column | Meaning / units |
+| --- | --- | --- |
+| 1 | `endpoint_index` | 1-based position in the selected endpoint list |
+| 2 | `endpoint` | Public, normalized label, with the formula protection below |
+| 3 | `chain_id` | Exact decimal chain string; empty if handshake failed |
+| 4 | `status` | Existing healthy/degraded/unreachable/mismatch status |
+| 5 | `network_status` | match/mismatch/unknown; empty when expected-chain guard is off |
+| 6 | `attempts` | Measured block calls attempted |
+| 7 | `successes` | Successful measured block calls |
+| 8 | `success_rate_pct` | Successful measured calls as percent, 0–100 |
+| 9 | `latency_sample_count` | Number of successes used for latency statistics |
+| 10 | `latency_min_ms` | Minimum successful-call latency in ms |
+| 11 | `latency_median_ms` | Median successful-call latency in ms |
+| 12 | `latency_p95_ms` | Nearest-rank p95 in ms |
+| 13 | `latency_p99_ms` | Nearest-rank p99 in ms |
+| 14 | `latency_max_ms` | Maximum successful-call latency in ms |
+| 15 | `latency_stddev_ms` | Population standard deviation in ms, divisor n |
+| 16 | `latest_block` | Exact highest successful measured block, decimal text |
+| 17 | `lag_blocks` | Exact known non-negative relative lag, decimal text; empty when unknown |
+| 18 | `peer_count` | Other usable same-chain endpoints |
+| 19 | `handshake_errors` | JSON category/count object for handshake failures |
+| 20 | `sample_errors` | JSON category/count object for measured failures |
+| 21 | `warmup_attempts` | Unmeasured warm-up calls attempted; empty when disabled |
+| 22 | `warmup_successes` | Successful warm-up calls; empty when disabled |
+| 23 | `warmup_duration_ms` | Complete warm-up elapsed ms; empty when disabled |
+| 24 | `warmup_errors` | JSON category/count object; empty when warm-up disabled |
+| 25 | `reference_index` | Selected 1-based reference index; empty in peer-maximum mode |
+| 26 | `lag_status` | Existing reference comparison reason; empty without explicit reference |
+| 27 | `expected_chain` | Exact expected chain decimal text; empty when guard is off |
+| 28 | `lag_threshold_blocks` | Inclusive known-lag threshold in blocks |
+| 29 | `samples` | Requested measured attempts per accepted endpoint |
+| 30 | `timeout_ms` | Timeout per complete RPC request in ms |
+| 31 | `concurrency` | Effective concurrent worker count |
+| 32 | `warmup_requested` | Configured warm-up calls per accepted endpoint; empty at zero/off |
+| 33 | `interval_ms` | Minimum interval between round starts; empty at zero/off |
+| 34 | `pacing_wait_ms` | Actual total explicit pacing wait; empty at zero/off interval |
+| 35 | `started_at` | UTC ISO run-start timestamp |
+| 36 | `generated_at` | UTC ISO report-generation timestamp |
+| 37 | `duration_ms` | Whole-run elapsed ms, including preparation and waits |
+| 38 | `demo` | true for the local synthetic demo; empty otherwise |
+| 39 | `strict_passed` | **Whole-run** strict result, true/false; empty if disabled |
+| 40 | `strict_max_failures` | Allowed measured failures per endpoint; empty if strict disabled |
+| 41 | `strict_violations` | JSON array of this endpoint's policy violation codes, in report order; empty if strict disabled |
+| 42 | `strict_lag_check` | compared, unchecked, or no_samples; empty if strict disabled |
+
+A quoted empty cell (`""`, parsed as an empty string) represents JSON null or an
+absent/disabled field. It does not mean zero, false, pass, or known freshness.
+Real numeric zero is `"0"`, and a real boolean false is `"false"`. For example,
+unknown lag is empty while a measured zero lag is `0`; a positive interval with
+no required wait has `pacing_wait_ms=0`, whereas disabled pacing leaves it empty.
+Enabled but skipped warm-up has zero attempts/successes/time and an empty error
+object, so it is distinguishable from disabled warm-up.
+
+Error cells use compact JSON objects with category keys sorted in ascending order,
+for example `{"HTTP_ERROR":1,"TIMEOUT":2}` after CSV parsing. Parse that cell as JSON
+if category counts are needed. `{}` means no recorded error in that phase; no error
+category is invented for a network mismatch. The report's existing `errors` map
+belongs entirely to the handshake when `chainId` is null, or to measured calls
+otherwise: a failed handshake prevents measurement. Warm-up errors stay separate.
+Only sanitized categories/counts are exported, never URLs, headers, raw provider
+messages or arbitrary extra report properties.
+
+With strict mode enabled, `strict_violations=[]` means this endpoint has no policy
+violations. It does **not** mean the entire run passed: consult `strict_passed`,
+which is repeated unchanged on all rows. `strict_lag_check=unchecked` identifies a
+successful endpoint whose lag was not checked; `no_samples` means no successful
+measured sample. `compared` means relative lag was available, not that it passed
+the threshold or that the node is current. Strict pass with unknown lag retains
+its existing interpretation; CSV never substitutes a zero lag or a freshness claim.
+
+CSV omits individual observations, round boundaries, narrative latency/policy
+notes, and verbose policy messages. Use `--json` for those details, the versioned
+schema, or lossless access to labels without CSV formula protection. Short samples
+still cannot reliably estimate tails; p99 equals max below 100 successes. Relative
+lag and a strict pass still do not establish trusted freshness or uptime.
+
+### Spreadsheet import and formula protection
+
+Quoting alone does not prevent spreadsheet formulas. Before quoting, the CSV
+formatter prepends an ASCII apostrophe to text beginning with `=`, `+`, `-`, `@`
+or their full-width equivalents, including after leading whitespace, Unicode
+control or format characters. Leading tab/CR/LF within that prefix also triggers
+protection. This applies centrally to every selected string cell. For example,
+`=1+1` becomes `'=1+1`; an ordinary CSV parser sees that added apostrophe as data.
+Ordinary labels keep their text, and JSON/table labels are unaffected. Commas and
+quotes cannot create extra cells because quoting/doubling is applied afterward.
+
+Import using your spreadsheet's text/CSV import dialog with UTF-8 and comma as the
+delimiter. Explicitly select **Text** for public labels, `chain_id`, `latest_block`,
+`lag_blocks`, and `expected_chain` (or all columns), and disable formula/type
+auto-detection when available. Exact decimal strings are never converted through
+JavaScript Number by the exporter, but spreadsheet auto-detection can still round
+large integers or reinterpret text; CSV double quotes do not enforce a cell type.
+Do not use `="digits"` formulas to preserve identifiers.
+
+The apostrophe reduces formula interpretation risk; it is not a universal safety
+guarantee. Applications, locales, import options, and save/reopen operations can
+handle or remove prefixes differently. Do not remove protection before opening
+untrusted labels in a spreadsheet. The protection is not a general secret detector
+or sanitizer for other contexts. See [OWASP's CSV injection guidance](https://owasp.org/www-community/attacks/CSV_Injection)
+for spreadsheet-specific limitations.
 
 ## Published JSON report schema
 
