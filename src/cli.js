@@ -5,6 +5,7 @@ import { runDemo } from './demo.js';
 import { formatTable } from './format.js';
 import { formatCsv } from './csv.js';
 import { formatMarkdown } from './markdown.js';
+import { OutputError, prepareOutput, validateOutputOptions } from './output.js';
 import { ConfigError, loadConfig } from './config.js';
 import { HealthPolicyError, parseHealthPolicy, evaluateHealthPolicy } from './health-policy.js';
 
@@ -33,6 +34,8 @@ Options:
   --json             Write a versioned JSON report
   --csv              Write endpoint aggregates as CSV (CLI-only)
   --markdown         Write a shareable Markdown report (CLI-only)
+  --output <file>    Atomically save the selected report; stdout empty (CLI-only)
+  --overwrite        Allow replacing a regular file; requires --output (CLI-only)
   --demo             Compare three synthetic local endpoints
   --help, -h         Show help
   --version, -v      Show version
@@ -57,7 +60,16 @@ Control characters become spaces; whitespace is collapsed and trimmed.
 Markdown includes measurement conditions, phase errors, timings and strict reasons.
 Dynamic Markdown text is escaped, including HTML and bare URL/email autolinks.
 An em dash means unknown; Disabled is not PASS. Use JSON for per-attempt details.
-Redirect stdout to save a report; a completed report is written even on exit 1.
+--output refuses existing paths by default, including concurrent creation.
+--overwrite permits atomic replacement; directories, special files, final symlinks
+and input-config aliases are refused. Parent directories must already exist.
+New options may each occur once; empty output paths are errors, even with help/version.
+Valid help/version never inspect output/config paths or start RPCs.
+Files use a private sibling temp (0600 on POSIX), full write, fsync and close,
+then hard-link publication (no overwrite) or rename (overwrite). Saving preserves
+health exits 0/1; file errors return 2 without paths or raw system messages.
+Atomic visibility is not crash durability. Abrupt exit can leave a private temp;
+hostile parent-directory replacement is outside the guarantee. See README.
 CSV has one header and one row per endpoint, UTF-8, quoted fields, and CRLF lines.
 Empty cells mean unknown/absent, not zero. Errors are JSON category/count objects;
 warm-up and strict fields are empty when disabled. Strict failure still writes CSV.
@@ -81,7 +93,7 @@ With --strict, every endpoint needs a measured success; failed measured calls mu
 be <= --max-failures and known lag <= --lag-threshold (inclusive, in blocks).
 Handshake failures, mismatches, warm-up errors, and unusable/different-chain
 references always fail. Partial measured failures may pass within the limit;
-statuses and errors remain unchanged. The full report is printed before exit 0/1.
+statuses and errors remain unchanged. The full report is written before exit 0/1.
 Unknown lag for a lone same-chain endpoint or the reference itself is unchecked,
 not a failure. Passing does not establish freshness, trust, or uptime.
 Strict flags are CLI-only; config validation/precedence stays unchanged.
@@ -98,7 +110,7 @@ export async function main(args, env, stdout, stderr) {
   try {
     let parsed;
     try {
-      parsed = parseArgs({ args, allowPositionals: true, strict: true, options: {
+      parsed = parseArgs({ args, allowPositionals: true, strict: true, tokens: true, options: {
         config: { type: 'string' }, samples: { type: 'string' }, timeout: { type: 'string' },
         concurrency: { type: 'string' }, warmup: { type: 'string' }, interval: { type: 'string' },
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
@@ -106,12 +118,14 @@ export async function main(args, env, stdout, stderr) {
         strict: { type: 'boolean' }, 'max-failures': { type: 'string' },
         label: { type: 'string', multiple: true },
         json: { type: 'boolean' }, csv: { type: 'boolean' }, markdown: { type: 'boolean' }, demo: { type: 'boolean' },
+        output: { type: 'string' }, overwrite: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
       } });
     } catch { throw new Error('Invalid arguments. Use --help for available options.'); }
     const { values, positionals } = parsed;
     if (values.csv && values.json) throw new Error('Use either --csv or --json, not both.');
     if (values.markdown && (values.csv || values.json)) throw new Error('Use --markdown without --json or --csv.');
+    validateOutputOptions(values, parsed.tokens);
     if (values.help) { stdout.write(help); return 0; }
     if (values.version) {
       const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -140,7 +154,10 @@ export async function main(args, env, stdout, stderr) {
     let endpoints = positionals;
     if (values.demo && endpoints.length) throw new Error('Use --demo without endpoint URLs.');
     if (values.demo && values.config !== undefined) throw new Error('Use --demo without --config.');
-    const config = values.config === undefined ? {} : await loadConfig(values.config, env);
+    let configIdentity;
+    const config = values.config === undefined ? {} : await loadConfig(values.config, env, {
+      onRead: identity => { configIdentity = identity; },
+    });
     const options = {
       samples: values.samples === undefined ? config.samples ?? 5 : Number(values.samples),
       warmup: values.warmup === undefined ? config.warmup ?? 0 : Number(values.warmup),
@@ -169,18 +186,22 @@ export async function main(args, env, stdout, stderr) {
     if (config.reference !== undefined && Array.isArray(endpoints) && config.reference > endpoints.length) {
       throw new ConfigError('Config reference exceeds the selected endpoint count.');
     }
+    const publish = values.output === undefined ? undefined : await prepareOutput(values.output, {
+      overwrite: values.overwrite, configPath: values.config, configIdentity,
+    });
     const report = values.demo ? await runDemo(options) : await benchmark(endpoints, options);
     if (healthOptions) report.healthPolicy = evaluateHealthPolicy(report, healthOptions);
     const output = values.csv ? formatCsv(report)
       : values.markdown ? formatMarkdown(report)
       : (values.json ? JSON.stringify(report, null, 2) : formatTable(report)) + '\n';
-    stdout.write(output);
+    if (publish) await publish(output);
+    else stdout.write(output);
     if (healthOptions) return report.healthPolicy.passed ? 0 : 1;
     return report.results.some((result) => result.successes > 0) ? 0 : 1;
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
     const expected = /^(Use |Provide |Samples |Warm-up |Interval |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
-    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
+    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }
 }

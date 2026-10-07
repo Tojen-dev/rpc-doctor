@@ -6,7 +6,8 @@
 **Which RPC is fast, which is falling behind, and which is failing?**
 
 RPC Doctor compares EVM JSON-RPC endpoints from your machine and produces a readable
-table, a JSON report, or CSV. Zero runtime dependencies. No wallet, API key, or internet
+table, JSON, CSV, or Markdown report, on stdout or in an atomic report file.
+Zero runtime dependencies. No wallet, API key, or internet
 connection is needed for the demo. Requires **Node.js 22+**.
 
 ## Try it
@@ -500,8 +501,8 @@ Without the guard, behavior and report fields remain unchanged; `expectedChain`,
 ## Optional strict health policy for CI
 
 `--strict` evaluates **every selected endpoint** after the entire benchmark. It
-prints the full table or JSON report, then exits `0` if the policy passes or `1`
-if it fails. Without this flag, exit behavior and report fields stay unchanged:
+writes the full selected report to stdout or `--output`, then exits `0` if the
+policy passes or `1` if it fails. Without this flag, exit behavior and report fields stay unchanged:
 one successful measured endpoint is enough for exit `0`, regardless of other
 failures. Invalid input or runtime errors remain exit `2`; Ctrl+C remains `130`.
 A failed health check does not write a usage error to stderr.
@@ -593,9 +594,11 @@ The existing report and error categories remain available in both formats.
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
 | `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
-| `--json` | Off | JSON only on stdout; `schemaVersion: 1`; conflicts with `--csv`/`--markdown` |
+| `--json` | Off | JSON report; `schemaVersion: 1`; conflicts with `--csv`/`--markdown` |
 | `--csv` | Off | CLI-only: fixed-column endpoint CSV; conflicts with `--json`/`--markdown` |
 | `--markdown` | Off | CLI-only: shareable Markdown report; conflicts with `--json`/`--csv` |
+| `--output <file>` | None | CLI-only: atomically save the selected format; stdout empty; refuse existing paths |
+| `--overwrite` | Off | CLI-only: allow atomic replacement of a regular file; requires `--output` |
 | `--demo` | Off | Synthetic local endpoints; ignores environment URLs |
 | `--help`, `-h` | | Usage |
 | `--version`, `-v` | | Version |
@@ -617,9 +620,103 @@ Respect your provider's request allowance.
 
 Exit `0`: by default, at least one usable endpoint; with `--strict`, every policy check passed.
 Exit `1`: by default, no usable block samples; with `--strict`, at least one policy violation.
-Both completed outcomes print the full report, including failed attempts and policy reasons.
-Exit `2`: invalid input or a runtime error.
+Both completed outcomes write the full report, including failed attempts and policy reasons,
+to stdout by default or to the file selected by `--output`.
+Exit `2`: invalid input, runtime error, or file-output failure (overrides health `0`/`1`).
 Exit `130`: interrupted with Ctrl+C.
+
+## Atomic report files
+
+`--output FILE` saves the complete selected format (table by default, or JSON,
+CSV, Markdown) and leaves stdout empty. The extension does not select the format.
+Relative paths use the working directory; parent directories must already exist.
+A path of `-` means a literal file named `-`, not stdout. Use `--output=-name`
+for a filename beginning with a hyphen. Whitespace inside a nonempty path is
+literal; quote it in the shell. No path is included in report data or diagnostics.
+
+```sh
+node bin/rpc-doctor.js --demo --json --output report.json
+# Explicitly replace an existing regular report file:
+node bin/rpc-doctor.js --demo --markdown --output report.md --overwrite
+
+# Strict failure still saves a complete report and exits 1.
+health_exit=0
+node bin/rpc-doctor.js --demo --strict --csv --output report.csv || health_exit=$?
+```
+
+By default, **any existing destination is refused**, including one created after
+the initial check. `--overwrite` allows atomic replacement of a regular file or
+creation if absent. It never truncates or chmods the old file: other hardlinks to
+that old inode retain their original bytes and mode. Directories, FIFOs, devices,
+sockets, final-component symlinks and dangling symlinks are refused. The final
+symlink target is never opened for writing. Parent directory symlinks are resolved.
+Destination checks run before RPC and again immediately before publication.
+Permissions are preflighted without creating a probe file; later changes, disk
+space, filesystem support and publication errors can still fail after measurement.
+
+The input config cannot also be the output, even with `--overwrite`. Protection
+checks direct and canonical paths, relative/parent aliases, and device/inode
+identity, including existing hardlinks and symlinks. The identity of the actual
+opened config file is retained privately even if its name is replaced later.
+No output settings or filesystem identity are added to config or report schema.
+Both `output` and `overwrite` config fields remain unknown-field errors.
+
+`--output` and `--overwrite` may each appear only once. Missing, empty,
+whitespace-only or NUL-containing output values are errors; `--overwrite` requires
+`--output`. Boolean assignments such as `--overwrite=false` are invalid. These
+argument rules and format conflicts take precedence over help/version. With valid
+option syntax, help/version still write their usual stdout text and do not inspect
+output/config paths, resolve endpoint environment input, start RPCs or create files.
+Existing configuration and benchmark validation remains in effect.
+
+Without `--output`, stdout bytes and exit behavior stay unchanged. With it, the
+same complete UTF-8 bytes are saved, including CSV's CRLF endings and Unicode
+labels. Saving does not change requests, calculations, timing fields, statuses or
+strict decisions; file work is outside measured benchmark duration. Successful
+publication preserves health exit `0` or `1`, including strict/all-endpoint
+failure. There is no success banner. Usage, config or benchmark failure creates
+no report and does not replace an old one. File errors produce safe stderr and
+exit `2` without raw system exceptions, paths, config contents or endpoint URLs.
+
+### Publication and filesystem limits
+
+After formatting the entire report in memory, the writer exclusively creates a
+unique `.rpc-doctor-<random UUID>.tmp` sibling with private mode `0600` on POSIX.
+It completes all writes (including short writes), syncs the file and closes it
+successfully before publication. Default publication uses an atomic hard link
+to the destination, which fails if that name exists, then removes the temp name.
+Overwrite publication uses same-directory rename. There is no unsafe copy fallback
+if these operations are unsupported. Only the writer's own temp name is cleaned
+up on ordinary failures; unrelated files and a pre-publication old report remain
+intact. A failed close prevents publication.
+
+This provides **atomic visibility of a complete report**, not a guarantee of
+survival after a crash or power loss. The parent directory is not synced, and
+filesystem/server semantics still apply. If removing the temp after a successful
+hard link fails, exit `2` explicitly warns that a complete report may already be
+published; it is not rolled back because another writer could have changed it.
+Cleanup failure can leave the private temp. Abrupt termination, including Ctrl+C
+during file writing or SIGKILL, can also leave it; Ctrl+C keeps exit `130` and no
+partial-report/cancellation feature is implemented.
+
+Preflight and final metadata checks are not locks on directory entries.
+`--overwrite` permits last-writer-wins replacement, including a concurrent regular
+file. A leaf entry swapped after the final check may itself be replaced by rename;
+rename does not follow a swapped symlink to modify its target. There is no promise
+of protection against hostile parent-directory or temp-name replacement. Use a
+directory controlled by the invoking user when these concerns matter.
+
+POSIX permission bits do not describe Windows ACLs. Filesystems without hard-link
+support or with incompatible rename/permission semantics fail safely; network
+filesystems may have different atomicity/durability guarantees. Tests cover real
+POSIX modes, links, FIFOs and permissions where supported, plus injected failures
+on every platform; Windows-specific behavior is not certified by the current
+Linux CI. See the [Node filesystem API](https://nodejs.org/docs/latest-v22.x/api/fs.html)
+for platform-specific operation details.
+
+Shell redirection remains available, but `> report.json` is performed by the shell
+and can truncate a file before the CLI even validates input; it does not use this
+atomic-output contract.
 
 ## CSV export
 
@@ -762,25 +859,24 @@ for spreadsheet-specific limitations.
 ## Markdown report
 
 Use the CLI-only `--markdown` flag for a standalone report suitable for a GFM
-(GitHub Flavored Markdown) viewer. Save stdout with shell redirection:
+(GitHub Flavored Markdown) viewer. Save it atomically with `--output`:
 
 ```sh
-node bin/rpc-doctor.js --demo --markdown > report.md
+node bin/rpc-doctor.js --demo --markdown --output report.md
 # Read private endpoints from RPC_DOCTOR_ENDPOINTS_JSON as above.
-node bin/rpc-doctor.js --samples 10 --warmup 1 --markdown > report.md
+node bin/rpc-doctor.js --samples 10 --warmup 1 --markdown --output measured.md
 
 # Preserve the health exit code while saving the complete report.
 health_exit=0
-node bin/rpc-doctor.js --demo --strict --markdown > report.md || health_exit=$?
+node bin/rpc-doctor.js --demo --strict --markdown --output strict.md || health_exit=$?
 ```
 
 `--markdown`, `--csv`, and `--json` are mutually exclusive in any order. Conflicts
 return exit `2` before config or endpoint environment reads and before RPC calls,
 including when combined with help/version. Otherwise `--markdown --help` and
 `--markdown --version` exit early without reading config or contacting endpoints.
-There is no `markdown` config field. No output-path option is provided; shell
-redirection creates/truncates its destination before the CLI runs, including when
-the CLI later rejects invalid input.
+There is no `markdown` config field. The CLI-only `--output` and `--overwrite`
+options follow the atomic-file contract above; without them Markdown goes to stdout.
 
 The formatter uses the completed, sanitized in-memory report. It adds no requests,
 retries, measurements, or health decisions. Default table output, JSON schema

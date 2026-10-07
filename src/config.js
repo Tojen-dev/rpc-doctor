@@ -13,7 +13,7 @@ async function readConfig(path) {
     // Nonblocking open prevents a named pipe from hanging before the file-type check.
     const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
-      const stat = await file.stat();
+      const stat = await file.stat({ bigint: true });
       if (!stat.isFile()) throw new ConfigError('Config must be a regular file.');
       if (stat.size > MAX_CONFIG_BYTES) throw new ConfigError('Config must not exceed 64 KiB.');
       // Bound the actual read too, in case the file grows after stat().
@@ -25,7 +25,8 @@ async function readConfig(path) {
         size += bytesRead;
       }
       if (size > MAX_CONFIG_BYTES) throw new ConfigError('Config must not exceed 64 KiB.');
-      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, size)));
+      return { config: JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, size))),
+        identity: { dev: stat.dev, ino: stat.ino } };
     } finally {
       await file.close();
     }
@@ -40,8 +41,10 @@ function hasOnlyKeys(value, keys) {
     && Object.keys(value).every((key) => keys.includes(key));
 }
 
-export async function loadConfig(path, env) {
-  const config = await readConfig(path);
+export async function loadConfig(path, env, { onRead } = {}) {
+  const { config, identity } = await readConfig(path);
+  // Keep the actual opened inode identity outside settings and report data.
+  onRead?.(identity);
   if (!hasOnlyKeys(config, ['endpoints', 'samples', 'timeout', 'concurrency', 'lagThreshold', 'reference', 'expectedChain', 'warmup', 'interval'])) {
     throw new ConfigError('Config must be an object containing only endpoints, samples, timeout, concurrency, lagThreshold, reference, expectedChain, warmup, and interval.');
   }
