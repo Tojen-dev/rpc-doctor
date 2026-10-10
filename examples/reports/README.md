@@ -16,6 +16,8 @@ URLs, keys, headers, or provider messages. Every JSON file validates against
 | `failure-v1.json` | Failed handshake plus an endpoint whose two measured attempts time out; no successful samples, null latencies |
 | `strict-pass-v1.json` | Successful measured samples and warm-up, selected reference with unchecked lag, strict pass |
 | `strict-fail-v1.json` | Rejected reference, warm-up and measured errors, positive pacing wait, strict failure reasons |
+| `historical-outcomes-v1.json` | Four healthy baselines with independent found/null/unsupported/error probe outcomes; exact requested number above Number.MAX_SAFE_INTEGER; separate phase timing |
+| `historical-skipped-v1.json` | Failed and wrong-chain handshakes; zero historical attempts, distinct skip reasons, null per-attempt times and zero phase duration |
 
 The three historical examples were checked against the source at the named Git
 commits. The compatibility claim is for these shapes, not every output of every

@@ -22,6 +22,12 @@ export async function runDemo(options) {
           return;
         }
         res.setHeader('content-type', 'application/json');
+        if (request.method === 'eth_getBlockByNumber') {
+          const historical = delay === 5 ? { result: { number: request.params[0], hash: `0x${'ab'.repeat(32)}` } }
+            : delay === 35 ? { result: null } : { error: { code: -32601, message: 'Synthetic method unavailable.' } };
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...historical }));
+          return;
+        }
         res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: request.method === 'eth_chainId' ? '0x1' : height }));
       });
       servers.push(server);

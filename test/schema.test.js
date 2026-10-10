@@ -29,6 +29,7 @@ const fixtures = [
   ['legacy-cli-v1', ['healthy']], ['legacy-warmup-v1', ['degraded']], ['legacy-variability-v1', ['healthy']],
   ['success-v1', ['healthy', 'healthy']], ['mixed-v1', ['healthy', 'degraded', 'healthy']],
   ['failure-v1', ['unreachable', 'unreachable']], ['strict-pass-v1', ['healthy']], ['strict-fail-v1', ['mismatch', 'degraded']],
+  ['historical-outcomes-v1', ['healthy', 'healthy', 'healthy', 'healthy']], ['historical-skipped-v1', ['unreachable', 'mismatch']],
 ];
 for (const [name, statuses] of fixtures) {
   test(`independent synthetic fixture: ${name}`, () => {
@@ -37,6 +38,17 @@ for (const [name, statuses] of fixtures) {
     assert.deepEqual(report.results.map(r => r.status), statuses);
     assert.equal(report.schemaVersion, 1);
     if (name === 'strict-pass-v1') assert.equal(report.healthPolicy.passed, true);
+    if (name === 'historical-outcomes-v1') {
+      assert.deepEqual(report.results.map(r => r.historicalBlock.status), ['found', 'null', 'unsupported', 'error']);
+      assert.equal(report.results[0].historicalBlock.number, '9007199254740993');
+      assert.equal(report.results[2].historicalBlock.error, 'RPC_ERROR');
+      assert.equal(report.results[3].historicalBlock.error, 'TIMEOUT');
+    }
+    if (name === 'historical-skipped-v1') {
+      assert.deepEqual(report.results.map(r => r.historicalBlock.skipReason), ['handshake_failed', 'network_mismatch']);
+      assert.equal(report.historicalPhase.durationMs, 0);
+      assert.ok(report.results.every(r => r.historicalBlock.startedMs === null && r.historicalBlock.attempts === 0));
+    }
     if (name === 'strict-fail-v1') {
       assert.equal(report.healthPolicy.passed, false);
       assert.deepEqual(report.healthPolicy.violations.map(v => v.code), ['NETWORK_MISMATCH', 'MEASURED_FAILURES', 'WARMUP_FAILURES', 'REFERENCE_MISMATCH']);
@@ -66,6 +78,36 @@ test('schema is standard Draft 2020-12 and compiles without unknown keywords', (
   assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema');
   assert.equal(ajv.validateSchema(schema), true);
   assert.throws(() => new Ajv2020({ strict: true }).compile({ type: 'object', requried: ['x'] }), /unknown keyword/);
+});
+
+test('historical additions are optional, checked when present, and allow future object properties', () => {
+  const report = fixture('historical-outcomes-v1');
+  for (const path of ['settings.historicalBlock', 'historicalPhase', 'results.0.historicalBlock']) valid(edit(report, path, undefined, true));
+  for (const path of [
+    ...['startedMs', 'finishedMs', 'durationMs'].map(key => `historicalPhase.${key}`),
+    ...['status', 'attempts', 'number', 'hash', 'error', 'skipReason', 'startedMs', 'finishedMs', 'durationMs'].map(key => `results.0.historicalBlock.${key}`),
+  ]) invalid(edit(report, path, undefined, true));
+  for (const [path, values] of [
+    ['settings.historicalBlock', [0, null, '01', '-1', '0x1', '1\n', '9'.repeat(79)]],
+    ['historicalPhase', [null, []]], ['results.0.historicalBlock', [null, []]],
+    ...['startedMs', 'finishedMs', 'durationMs'].map(key => [`historicalPhase.${key}`, [null, -1, 1.5, '1']]),
+    ...['startedMs', 'finishedMs', 'durationMs'].map(key => [`results.0.historicalBlock.${key}`, [-1, 1.5, '1']]),
+    ['results.0.historicalBlock.status', ['available', null, 0]], ['results.0.historicalBlock.attempts', [-1, 2, 0.5, null]],
+    ['results.0.historicalBlock.number', [0, '00', '-1', '0x1', '1\n', '9'.repeat(79)]],
+    ['results.0.historicalBlock.hash', [0, '', '0x1', `0x${'AB'.repeat(32)}`, `0x${'ab'.repeat(32)}\n`]],
+    ['results.0.historicalBlock.error', ['UNSUPPORTED', -32601, 'SYNTHETIC_SECRET']],
+    ['results.0.historicalBlock.skipReason', ['unknown', '', 0]],
+  ]) for (const value of values) invalid(edit(report, path, value));
+  for (const path of ['historicalPhase.future', 'results.0.historicalBlock.future']) valid(edit(report, path, { additive: true }));
+  valid(edit(report, 'settings.historicalBlock', (2n ** 256n - 1n).toString()));
+});
+
+test('current historical demo reports validate for success, strict failure and all-skipped outcomes', () => {
+  for (const flags of [[], ['--strict'], ['--expected-chain', '2']]) {
+    const r = spawnSync(process.execPath, ['bin/rpc-doctor.js', '--demo', '--samples', '3', '--historical-block', '0xA', '--json', ...flags], { encoding: 'utf8', timeout: 10000 });
+    assert.equal(r.status, flags.length ? 1 : 0, r.stderr);
+    const report = JSON.parse(r.stdout); valid(report); assert.equal(report.settings.historicalBlock, '10');
+  }
 });
 
 test('mandatory core and present optional objects reject missing members', () => {

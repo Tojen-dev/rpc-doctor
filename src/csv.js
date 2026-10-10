@@ -62,7 +62,22 @@ const columns = [
 ];
 
 export function formatCsv(report) {
-  const rows = [columns.map(([name]) => name),
-    ...report.results.map((result, index) => columns.map(([, get]) => get(result, report, index)))];
+  const selected = report.settings.historicalBlock === undefined ? columns : [...columns,
+    ['historical_requested_block', (r, report) => report.settings.historicalBlock],
+    ['historical_status', r => r.historicalBlock.status],
+    ['historical_attempts', r => r.historicalBlock.attempts],
+    ['historical_number', r => r.historicalBlock.number],
+    ['historical_hash', r => r.historicalBlock.hash],
+    ['historical_error', r => r.historicalBlock.error],
+    ['historical_skip_reason', r => r.historicalBlock.skipReason],
+    ['historical_started_ms', r => r.historicalBlock.startedMs],
+    ['historical_finished_ms', r => r.historicalBlock.finishedMs],
+    ['historical_duration_ms', r => r.historicalBlock.durationMs],
+    ['historical_phase_started_ms', (r, report) => report.historicalPhase.startedMs],
+    ['historical_phase_finished_ms', (r, report) => report.historicalPhase.finishedMs],
+    ['historical_phase_duration_ms', (r, report) => report.historicalPhase.durationMs],
+  ];
+  const rows = [selected.map(([name]) => name),
+    ...report.results.map((result, index) => selected.map(([, get]) => get(result, report, index)))];
   return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }

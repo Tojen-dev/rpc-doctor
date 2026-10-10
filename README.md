@@ -39,7 +39,9 @@ node bin/rpc-doctor.js --samples 10 --timeout 3000 \
 ```
 
 Replace the example URLs with your provider endpoints. Local nodes are supported.
-The only methods sent in v0.1 are `eth_chainId` and `eth_blockNumber`.
+Baseline measurements send only `eth_chainId` and `eth_blockNumber`.
+The opt-in `--historical-block` probe also sends `eth_getBlockByNumber` once per
+accepted endpoint after all measured rounds.
 No transaction submission or signing is performed.
 
 For endpoint URLs containing credentials, populate `RPC_DOCTOR_ENDPOINTS_JSON` via
@@ -194,7 +196,8 @@ measurement. A single endpoint, or peers that are all behind, cannot establish f
 Five samples make a quick check, not a statistically robust p95 or p99 benchmark.
 
 Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including
-chain handshakes, optional warm-up, and block samples. Each endpoint's requests remain sequential.
+chain handshakes, optional warm-up, block samples and the optional historical
+probe. Each endpoint's requests remain sequential.
 A preparation worker finishes one endpoint's handshake and warm-up before moving
 to the next endpoint. Measured workers instead perform one attempt per endpoint
 per round, with a barrier after preparation and after every round.
@@ -591,6 +594,7 @@ The existing report and error categories remain available in both formats.
 | `--lag-threshold <n>` | 3 | Maximum allowed lag; integer from 0 to 9007199254740991 |
 | `--reference <n>` | Peer maximum | 1-based index in selected URL list; same-chain comparisons only, no fallback |
 | `--expected-chain <id>` | None | Decimal or `0x`-hex ID, 0–2^256−1; reject other networks before block samples |
+| `--historical-block <n>` | None | CLI-only: one optional block lookup after measured rounds; decimal/`0x` integer 0–2^256−1, at most once |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
 | `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
@@ -605,12 +609,15 @@ The existing report and error categories remain available in both formats.
 
 Supply 1–20 distinct HTTP(S) URLs. URL userinfo, fragments, and redirects are refused.
 Response bodies are limited to 1 MiB. Each endpoint receives at most
-**`1 + warmup + samples` requests** (one handshake, warm-up, measured samples).
+**`1 + warmup + samples + H` requests**, where `H=1` only with `--historical-block`,
+otherwise `H=0` (handshake, warm-up, measured samples, optional probe).
 Failed or mismatched handshakes stop after one request; later failures do not
 reduce the configured attempt count. Warm-up adds up to `warmup × timeout` ms of
 request waiting per accepted endpoint, plus processing overhead. With concurrency
 `C` and `E` selected endpoints, a conservative request-time allowance remains
-`ceil(E / C) × (1 + warmup + samples) × timeout` ms. When planning a paced run,
+`ceil(E / C) × (1 + warmup + samples + H) × timeout` ms. The optional probe adds at
+most one timeout per accepted endpoint, scheduled in its own bounded phase.
+When planning a paced run,
 allow up to `(samples - 1) × interval` ms of additional deliberate waiting, plus
 timer/scheduling/processing overhead. Long rounds consume some or all of that
 interval, and no accepted endpoints means no pacing waits. Preparation and each
@@ -624,6 +631,120 @@ Both completed outcomes write the full report, including failed attempts and pol
 to stdout by default or to the file selected by `--output`.
 Exit `2`: invalid input, runtime error, or file-output failure (overrides health `0`/`1`).
 Exit `130`: interrupted with Ctrl+C.
+
+## Optional historical block probe
+
+`--historical-block NUMBER` performs one read-only lookup for an explicitly chosen
+block number on each endpoint that passed its chain handshake and expected-chain
+guard. It is **CLI-only**; `historicalBlock` is not a config field. Nothing is
+probed without the flag, and all existing report fields, format bytes and baseline
+request order remain unchanged when it is omitted.
+
+```sh
+node bin/rpc-doctor.js --demo --historical-block 0 --json
+node bin/rpc-doctor.js --demo --historical-block 0x20000000000001 --markdown
+# With private endpoint URLs in RPC_DOCTOR_ENDPOINTS_JSON:
+node bin/rpc-doctor.js --historical-block 19000000 --csv --output historical.csv
+```
+
+Input follows the expected-chain grammar: decimal `0` or a nonzero digit followed
+by digits, or lowercase `0x` followed by a canonical hex quantity (uppercase hex
+digits are accepted). No leading zeros except `0`/`0x0`, signs, fractions,
+exponents, whitespace or tags (`latest`, `earliest`, `pending`, `safe`, `finalized`).
+The range is **0 through 2^256−1**, with at most 78 input characters, parsed using
+`BigInt`. JSON/CSV report the exact canonical decimal string; RPC sends minimal
+lowercase hex, including `0x0`. Values above Number.MAX_SAFE_INTEGER retain all
+digits. The CLI rejects empty, missing, invalid or repeated values before reading
+config/environment input, inspecting output files or sending RPCs, even with
+help/version. Valid help/version remain free of probe or output-file side effects.
+The CLI does not select a block automatically or check that the chosen number is
+older than the current head; an unavailable/future number may return null.
+
+After the final measured round completes, the probe sends
+`eth_getBlockByNumber` with `[canonicalHex, false]`. The method/parameters follow
+the [Ethereum execution API](https://github.com/ethereum/execution-apis/blob/main/src/eth/block.yaml)
+and [Ethereum JSON-RPC documentation](https://ethereum.org/developers/docs/apis/json-rpc/#eth_getblockbynumber).
+`false` requests transaction hashes instead of full transaction objects; no
+transactions are separately fetched and all transaction data is discarded.
+There are no retries, alternate methods, range scans or pacing waits for this
+phase. It uses the same concurrency cap, request timeout (including body reading),
+redirect policy and 1 MiB response limit as baseline requests. Request IDs stay
+unique across all phases. Even an accepted endpoint whose measured calls all
+failed receives its one historical attempt.
+
+| Probe `status` | Meaning |
+| --- | --- |
+| `found` | An object with a canonical hex `number` exactly equal to the requested integer and a non-null `0x` + 64-hex-digit `hash`; output number is decimal and hash is lowercase |
+| `null` | A valid successful response explicitly returned null; this does not distinguish missing, future, pruned or provider-specific absence |
+| `unsupported` | A valid, matching-ID JSON-RPC error with integer code `-32601` (method unavailable); `error` remains `RPC_ERROR` |
+| `error` | Sanitized transport, HTTP, timeout, oversized body, malformed response, invalid/mismatched number/hash, or any other RPC error |
+| `skipped` | No historical request: `skipReason` is `handshake_failed` or `network_mismatch` |
+
+Only `-32601` establishes this limited unsupported outcome, as defined by
+[JSON-RPC 2.0](https://www.jsonrpc.org/specification#error_object). Provider message
+text is never used for classification. Invalid params (`-32602`), generic server
+errors and pruned-history errors remain `error`/`RPC_ERROR`; HTTP failures and
+malformed error envelopes are not unsupported. An error never means a null block.
+Only the number/hash projection is validated, not the complete block schema or
+cryptographic authenticity. Extra fields, whole blocks, raw errors/messages,
+transaction lists, endpoint URLs and headers are never retained in the report.
+
+**A found header does not establish historical state access, coverage of other
+blocks, canonicality, freshness or archive-node support.** No state or contract
+call is made. Probe results do not change baseline attempts/successes/errors,
+warm-up, measured latency statistics, latest block, lag, status or strict policy.
+An optional probe error can accompany a healthy baseline and exit `0`; a found
+header cannot rescue failed baseline samples from exit `1`. Whole-run elapsed
+and generation timestamp include the additional phase; saving still preserves
+health exit `0`/`1` with all results, subject to file errors returning `2`.
+
+### Opt-in report additions
+
+JSON schemaVersion stays `1`. Only enabled runs add `settings.historicalBlock`
+(decimal string), top-level `historicalPhase`, and `results[].historicalBlock`:
+
+| Object/field | Meaning |
+| --- | --- |
+| `historicalPhase.startedMs` / `finishedMs` / `durationMs` | Rounded client elapsed offsets and phase duration, including worker scheduling; included in whole-run elapsed |
+| Result `status` / `attempts` | Outcome above; attempts is 1 for any completed request outcome, 0 when skipped |
+| Result `number` / `hash` | Validated projection for found; null otherwise |
+| Result `error` | Existing sanitized error category for error/unsupported; null for found/null/skipped |
+| Result `skipReason` | Reason for skipped; null for attempted probes |
+| Result `startedMs` / `finishedMs` / `durationMs` | Rounded client offsets and per-attempt elapsed time, including failures and result validation, excluding worker queue wait; all null when skipped |
+
+All offsets use the same run start as measured observations. Durations are not
+measured-sample latency and overlapping endpoint times must not be summed as
+phase elapsed. An all-skipped phase still has its own boundary/duration; zero
+elapsed is possible. Null means unavailable, not zero or pass. Schema checks
+types/enums and the 78-digit bound, but not exact 2^256−1 range or cross-field
+consistency (number equality, status/error combinations, attempt counts, timings).
+The CLI performs the request/response semantic checks.
+
+Table and Markdown append a separate historical section with request, phase
+timing, each outcome, projection, errors/skip reasons and limitations. CSV retains
+its original 42 columns in the same order, then appends these **13 columns only
+when enabled** (55 total). Existing CSV quoting/formula protection still applies;
+null fields are empty, while real zero is `0`.
+
+| Column | Meaning |
+| --- | --- |
+| 43 `historical_requested_block` | Exact requested decimal number, repeated per row |
+| 44 `historical_status` | found/null/unsupported/error/skipped |
+| 45 `historical_attempts` | 0 or 1 |
+| 46 `historical_number` | Exact returned decimal number; empty unless found |
+| 47 `historical_hash` | Lowercase hash; empty unless found |
+| 48 `historical_error` | Sanitized category; empty if none |
+| 49 `historical_skip_reason` | Reason; empty unless skipped |
+| 50 `historical_started_ms` | Per-attempt start offset; empty if skipped |
+| 51 `historical_finished_ms` | Per-attempt finish offset; empty if skipped |
+| 52 `historical_duration_ms` | Per-attempt elapsed; empty if skipped |
+| 53 `historical_phase_started_ms` | Phase start offset, repeated |
+| 54 `historical_phase_finished_ms` | Phase finish offset, repeated |
+| 55 `historical_phase_duration_ms` | Phase elapsed, repeated |
+
+Use CSV header names; consumers requiring exactly 42 columns should omit the
+flag. In the synthetic demo, the three optional outcomes are found, null and
+unsupported respectively, independently of measured rate limiting and lag.
 
 ## Atomic report files
 
@@ -739,7 +860,8 @@ on stderr and no fabricated CSV report; Ctrl+C remains `130`. Preserve the comma
 exit code in CI rather than inferring success from a readable CSV file.
 
 The byte format is UTF-8 without a BOM, comma-separated, with one header and **42
-fields in every record**. Every field is double-quoted; embedded quotes are doubled,
+fields in every record by default**, or 55 with `--historical-block` as documented
+above. Every field is double-quoted; embedded quotes are doubled,
 and embedded CR/LF remain inside the quoted field. Records end with CRLF, including
 the final record, with no extra blank record. The CSV follows the quoting and record
 conventions in [RFC 4180](https://www.rfc-editor.org/rfc/rfc4180). No banner, commentary,
@@ -792,7 +914,7 @@ precision instead of the table's one-decimal display.
 | 34 | `pacing_wait_ms` | Actual total explicit pacing wait; empty at zero/off interval |
 | 35 | `started_at` | UTC ISO run-start timestamp |
 | 36 | `generated_at` | UTC ISO report-generation timestamp |
-| 37 | `duration_ms` | Whole-run elapsed ms, including preparation and waits |
+| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and the optional historical phase |
 | 38 | `demo` | true for the local synthetic demo; empty otherwise |
 | 39 | `strict_passed` | **Whole-run** strict result, true/false; empty if disabled |
 | 40 | `strict_max_failures` | Allowed measured failures per endpoint; empty if strict disabled |
@@ -1001,7 +1123,9 @@ absence and zero do not substitute for null.
 
 Later additions are optional for compatibility: `startedAt`, `rounds`,
 `observations`, `latencyNotes`, `latencySampleCount`, `stddev`, `p99`, and
-`healthPolicy`. Reference/network/warm-up/pacing fields and `demo` are optional
+`healthPolicy`. The optional historical probe adds `settings.historicalBlock`,
+`historicalPhase` and each result's `historicalBlock`; old reports need none of
+these fields. Reference/network/warm-up/pacing fields and `demo` are optional
 because they depend on selected options. **Every known field is checked when
 present**; an optional object still needs its required members. Current output
 omits warm-up/pacing settings at zero; if present, `warmup` and `intervalMs` must

@@ -6,6 +6,7 @@ import { formatTable } from './format.js';
 import { formatCsv } from './csv.js';
 import { formatMarkdown } from './markdown.js';
 import { OutputError, prepareOutput, validateOutputOptions } from './output.js';
+import { HistoricalBlockError, parseHistoricalBlock } from './historical.js';
 import { ConfigError, loadConfig } from './config.js';
 import { HealthPolicyError, parseHealthPolicy, evaluateHealthPolicy } from './health-policy.js';
 
@@ -27,6 +28,7 @@ Options:
   --lag-threshold <n> Allowed lag in blocks, 0–9007199254740991 (default: 3)
   --reference <n>     Reference endpoint index, starting at 1 in the selected list
   --expected-chain <id> Require a decimal or 0x-hex chain ID (optional)
+  --historical-block <n> One optional block-header lookup after samples (CLI-only)
   --strict           Exit 1 when any endpoint fails the CI health policy (CLI-only)
   --max-failures <n>  Allowed failed measured calls per endpoint, 0–100 (default: 0;
                      requires --strict; CLI-only)
@@ -41,7 +43,8 @@ Options:
   --version, -v      Show version
 
 At most 20 endpoints; requests per endpoint stay sequential. No transactions sent.
-Concurrency includes handshakes, warm-up, and samples; it also applies to --demo.
+Concurrency includes handshakes, warm-up, samples and optional historical probes;
+it also applies to --demo.
 All endpoints finish preparation before sampling begins. Each measured round sends
 one call per accepted endpoint and waits for all outcomes before the next round.
 Interval uses the previous round's actual start, after its completion barrier;
@@ -51,7 +54,16 @@ Slow endpoints delay all peers; observations are not synchronized.
 JSON records round boundaries and each attempt's start/finish in elapsed client ms
 from startedAt; the table shows each endpoint's first-start to last-finish window.
 Warm-up follows the network guard; failures and elapsed ms are reported separately.
-Maximum requests per endpoint: 1 + warmup + samples. No retries.
+Maximum requests per endpoint: 1 + warmup + samples (+1 with --historical-block).
+Historical block: decimal or 0x-hex, 0–2^256-1, at most 78 characters, no leading
+zeros/signs/whitespace/tags; at most once, validated even with help/version.
+The probe calls eth_getBlockByNumber with [canonicalHex,false] after all rounds,
+under the same timeout, 1 MiB body limit and concurrency. No retries or fallback.
+Failed/mismatched handshakes skip the probe. Found, null, unsupported (-32601 only),
+error and skipped stay separate; only matching number and 32-byte hash are retained.
+Probe time counts in Elapsed, not sample latency; health/status/lag are unchanged.
+One header is not proof of historical state, full history, canonicality or archive support.
+CSV adds 13 columns only when enabled; otherwise its 42-column contract is unchanged.
 Use environment input for API-key URLs to avoid storing them in shell history.
 Labels also name environment URLs; with --demo, supply three labels or none.
 Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
@@ -115,6 +127,7 @@ export async function main(args, env, stdout, stderr) {
         concurrency: { type: 'string' }, warmup: { type: 'string' }, interval: { type: 'string' },
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
         'expected-chain': { type: 'string' },
+        'historical-block': { type: 'string' },
         strict: { type: 'boolean' }, 'max-failures': { type: 'string' },
         label: { type: 'string', multiple: true },
         json: { type: 'boolean' }, csv: { type: 'boolean' }, markdown: { type: 'boolean' }, demo: { type: 'boolean' },
@@ -126,6 +139,10 @@ export async function main(args, env, stdout, stderr) {
     if (values.csv && values.json) throw new Error('Use either --csv or --json, not both.');
     if (values.markdown && (values.csv || values.json)) throw new Error('Use --markdown without --json or --csv.');
     validateOutputOptions(values, parsed.tokens);
+    if (parsed.tokens.filter(t => t.kind === 'option' && t.name === 'historical-block').length > 1) {
+      throw new HistoricalBlockError('Use --historical-block at most once.');
+    }
+    const historicalBlock = values['historical-block'] === undefined ? undefined : parseHistoricalBlock(values['historical-block']).toString();
     if (values.help) { stdout.write(help); return 0; }
     if (values.version) {
       const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -168,6 +185,7 @@ export async function main(args, env, stdout, stderr) {
       reference: values.reference === undefined ? config.reference : Number(values.reference),
       expectedChain: values['expected-chain'] === undefined ? config.expectedChain : values['expected-chain'],
       labels: values.label,
+      ...(historicalBlock === undefined ? {} : { historicalBlock }),
     };
     if (endpoints.length === 0 && config.endpoints !== undefined) {
       endpoints = config.endpoints;
@@ -201,7 +219,7 @@ export async function main(args, env, stdout, stderr) {
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
     const expected = /^(Use |Provide |Samples |Warm-up |Interval |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
-    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
+    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }
 }

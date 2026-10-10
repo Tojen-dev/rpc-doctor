@@ -38,7 +38,7 @@ fix it first and record the reason; the exact commit count is a planning target.
 
 ## RPC capabilities
 
-- [ ] **20. Historical block probe.** Check retrieval of a user-selected historical block; distinguish null, unsupported, and error; avoid claiming full archive support.
+- [x] **20. Historical block probe.** Check retrieval of a user-selected historical block; distinguish null, unsupported, and error; avoid claiming full archive support.
 - [ ] **21. Read-only call probe.** Support an explicit eth_call target/data/block with bounded response handling and no signing.
 - [ ] **22. Bounded log probe.** Check eth_getLogs for an explicit small range and optional filter; validate ranges before requests.
 - [ ] **23. Finality-tag support.** Probe safe/finalized blocks and distinguish unsupported tags from transient failures.

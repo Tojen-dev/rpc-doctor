@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-10T00:00:00.000Z",
+  "generatedAt": "2026-10-10T00:00:01.002Z",
+  "durationMs": 1002,
+  "settings": {
+    "samples": 1,
+    "timeoutMs": 1000,
+    "concurrency": 4,
+    "lagThreshold": 3,
+    "historicalBlock": "9007199254740993"
+  },
+  "historicalPhase": {
+    "startedMs": 2,
+    "finishedMs": 1002,
+    "durationMs": 1000
+  },
+  "latencyNotes": [
+    "Synthetic fixture: one successful measured sample does not establish stability."
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "startedMs": 1,
+      "finishedMs": 2
+    }
+  ],
+  "results": [
+    {
+      "endpoint": "Found header",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 3,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "historicalBlock": {
+        "status": "found",
+        "attempts": 1,
+        "number": "9007199254740993",
+        "hash": "0xabababababababababababababababababababababababababababababababab",
+        "error": null,
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "No block returned",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 3,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "historicalBlock": {
+        "status": "null",
+        "attempts": 1,
+        "number": null,
+        "hash": null,
+        "error": null,
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Method unavailable",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 3,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "historicalBlock": {
+        "status": "unsupported",
+        "attempts": 1,
+        "number": null,
+        "hash": null,
+        "error": "RPC_ERROR",
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Probe timed out",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 3,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "historicalBlock": {
+        "status": "error",
+        "attempts": 1,
+        "number": null,
+        "hash": null,
+        "error": "TIMEOUT",
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 1002,
+        "durationMs": 1000
+      }
+    }
+  ]
+}

@@ -1,10 +1,11 @@
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
 export class RpcError extends Error {
-  constructor(code, message) {
+  constructor(code, message, rpcCode) {
     super(message);
     this.name = 'RpcError';
     this.code = code;
+    if (rpcCode !== undefined) this.rpcCode = rpcCode;
   }
 }
 
@@ -83,7 +84,7 @@ export async function rpcCall(endpoint, method, params = [], { timeoutMs = 5000,
         throw new RpcError('INVALID_RESPONSE', 'Invalid JSON-RPC error envelope.');
       }
       // Provider messages can reflect API keys or URLs. Never propagate them.
-      throw new RpcError('RPC_ERROR', `JSON-RPC error ${data.error.code}.`);
+      throw new RpcError('RPC_ERROR', `JSON-RPC error ${data.error.code}.`, data.error.code);
     }
     return { result: data.result, durationMs: performance.now() - started };
   } catch (error) {

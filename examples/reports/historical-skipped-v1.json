@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-10T00:00:00.000Z",
+  "generatedAt": "2026-10-10T00:00:00.001Z",
+  "durationMs": 1,
+  "settings": {
+    "samples": 1,
+    "timeoutMs": 1000,
+    "concurrency": 2,
+    "lagThreshold": 3,
+    "expectedChain": "1",
+    "historicalBlock": "0"
+  },
+  "historicalPhase": {
+    "startedMs": 1,
+    "finishedMs": 1,
+    "durationMs": 0
+  },
+  "rounds": [],
+  "latencyNotes": [
+    "Synthetic fixture: rejected endpoints make no historical attempt."
+  ],
+  "results": [
+    {
+      "endpoint": "Handshake failed",
+      "chainId": null,
+      "latestBlock": null,
+      "attempts": 0,
+      "successes": 0,
+      "errors": {
+        "RPC_ERROR": 1
+      },
+      "latencyMs": {
+        "min": null,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "stddev": null,
+        "p99": null
+      },
+      "latencySampleCount": 0,
+      "successRate": 0,
+      "lagBlocks": null,
+      "peerCount": 0,
+      "status": "unreachable",
+      "networkStatus": "unknown",
+      "observations": [],
+      "historicalBlock": {
+        "status": "skipped",
+        "attempts": 0,
+        "number": null,
+        "hash": null,
+        "error": null,
+        "skipReason": "handshake_failed",
+        "startedMs": null,
+        "finishedMs": null,
+        "durationMs": null
+      }
+    },
+    {
+      "endpoint": "Wrong chain",
+      "chainId": "2",
+      "latestBlock": null,
+      "attempts": 0,
+      "successes": 0,
+      "errors": {},
+      "latencyMs": {
+        "min": null,
+        "median": null,
+        "p95": null,
+        "max": null,
+        "stddev": null,
+        "p99": null
+      },
+      "latencySampleCount": 0,
+      "successRate": 0,
+      "lagBlocks": null,
+      "peerCount": 0,
+      "status": "mismatch",
+      "networkStatus": "mismatch",
+      "observations": [],
+      "historicalBlock": {
+        "status": "skipped",
+        "attempts": 0,
+        "number": null,
+        "hash": null,
+        "error": null,
+        "skipReason": "network_mismatch",
+        "startedMs": null,
+        "finishedMs": null,
+        "durationMs": null
+      }
+    }
+  ]
+}

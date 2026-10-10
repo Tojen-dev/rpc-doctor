@@ -1,3 +1,5 @@
+import { HISTORICAL_NOTE } from './historical.js';
+
 // Dynamic content is always plain text, never Markdown syntax or inline code.
 // Encode ASCII punctuation, including URL/email delimiters: backslash escapes
 // alone do not prevent GFM bare autolinks. Entities are not parsed as syntax.
@@ -90,6 +92,23 @@ export function formatMarkdown(report) {
       : 'Unchecked lag endpoints: None.',
     ...(policy.notes ?? []).map(markdownText));
   } else sections.push('Disabled. No strict PASS/FAIL decision was requested.');
+  if (settings.historicalBlock !== undefined) {
+    sections.push('## Historical block probe',
+      table(['Setting', 'Value'], [
+        ['Requested block (decimal)', settings.historicalBlock],
+        ['Phase start (ms from run start)', report.historicalPhase.startedMs],
+        ['Phase finish (ms from run start)', report.historicalPhase.finishedMs],
+        ['Phase elapsed (ms)', report.historicalPhase.durationMs],
+      ]),
+      'One optional eth_getBlockByNumber request with full transactions disabled, after all measured rounds. The same timeout, body limit and concurrency apply. Probe and phase times include failed attempts; phase elapsed includes worker scheduling and counts in whole-run elapsed, never in measured latency. Probe offsets are client elapsed milliseconds; skipped timings are unavailable.',
+      table(['Index', 'Outcome', 'Attempts', 'Number', 'Hash', 'Error', 'Skip reason', 'Start (ms)', 'Finish (ms)', 'Duration (ms)'],
+        results.map((r, i) => {
+          const h = r.historicalBlock;
+          return [i + 1, h.status, h.attempts, h.number, h.hash, h.error, h.skipReason, h.startedMs, h.finishedMs, h.durationMs];
+        })),
+      'found means a matching number and valid 32-byte hash were returned; null means no block returned; unsupported means valid JSON-RPC -32601. Other failures are error, not absence or unsupported. skipped means handshake_failed or network_mismatch, with no attempt. An em dash means unavailable, not zero or success.',
+      HISTORICAL_NOTE);
+  }
   sections.push('Endpoint URLs, credentials, headers, and raw provider messages are omitted. Labels are public text; do not put secrets in labels.');
   return sections.join('\n\n') + '\n';
 }

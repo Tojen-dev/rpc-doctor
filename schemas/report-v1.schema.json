@@ -15,6 +15,7 @@
     "results": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/result" } },
     "demo": { "const": true },
     "pacingWaitMs": { "$ref": "#/$defs/elapsedMs" },
+    "historicalPhase": { "$ref": "#/$defs/historicalPhase" },
     "latencyNotes": { "$ref": "#/$defs/notes" },
     "rounds": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/round" } },
     "healthPolicy": { "$ref": "#/$defs/healthPolicy" }
@@ -56,6 +57,7 @@
         "lagThreshold": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "reference": { "$ref": "#/$defs/endpointIndex" },
         "expectedChain": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
+        "historicalBlock": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
         "warmup": { "type": "integer", "minimum": 1, "maximum": 20 },
         "intervalMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
       }
@@ -82,6 +84,32 @@
         "successes": { "type": "integer", "minimum": 0, "maximum": 20 },
         "errors": { "$ref": "#/$defs/errors" },
         "durationMs": { "$ref": "#/$defs/elapsedMs" }
+      }
+    },
+    "historicalPhase": {
+      "type": "object",
+      "required": ["startedMs", "finishedMs", "durationMs"],
+      "additionalProperties": true,
+      "properties": {
+        "startedMs": { "$ref": "#/$defs/elapsedMs" },
+        "finishedMs": { "$ref": "#/$defs/elapsedMs" },
+        "durationMs": { "$ref": "#/$defs/elapsedMs" }
+      }
+    },
+    "historicalBlock": {
+      "type": "object",
+      "required": ["status", "attempts", "number", "hash", "error", "skipReason", "startedMs", "finishedMs", "durationMs"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "enum": ["found", "null", "unsupported", "error", "skipped"] },
+        "attempts": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "number": { "anyOf": [{ "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 }, { "type": "null" }] },
+        "hash": { "type": ["string", "null"], "pattern": "^0x[0-9a-f]{64}(?![\\s\\S])" },
+        "error": { "anyOf": [{ "$ref": "#/$defs/errorCode" }, { "type": "null" }] },
+        "skipReason": { "enum": [null, "handshake_failed", "network_mismatch"] },
+        "startedMs": { "type": ["integer", "null"], "minimum": 0 },
+        "finishedMs": { "type": ["integer", "null"], "minimum": 0 },
+        "durationMs": { "type": ["integer", "null"], "minimum": 0 }
       }
     },
     "round": {
@@ -126,6 +154,7 @@
         "networkStatus": { "enum": ["unknown", "match", "mismatch"] },
         "lagStatus": { "enum": ["reference", "compared", "ahead", "reference_unavailable", "reference_mismatch", "different_chain", "no_data", "network_mismatch"] },
         "warmup": { "$ref": "#/$defs/warmup" },
+        "historicalBlock": { "$ref": "#/$defs/historicalBlock" },
         "observations": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/observation" } }
       }
     },

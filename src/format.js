@@ -1,3 +1,5 @@
+import { HISTORICAL_NOTE } from './historical.js';
+
 export function formatTable(report) {
   const reference = report.settings.reference;
   const guarded = report.settings.expectedChain !== undefined;
@@ -58,6 +60,16 @@ export function formatTable(report) {
       ...(report.healthPolicy.uncheckedLagEndpoints.length
         ? [`Unchecked lag: endpoint indices ${report.healthPolicy.uncheckedLagEndpoints.join(', ')}.`] : []),
       ...report.healthPolicy.notes,
+    ] : []),
+    ...(report.settings.historicalBlock !== undefined ? ['',
+      `Historical block: ${report.settings.historicalBlock} (optional, after measured rounds)`,
+      `Historical phase: ${report.historicalPhase.startedMs}–${report.historicalPhase.finishedMs}ms from start; elapsed ${report.historicalPhase.durationMs}ms (included in Elapsed).`,
+      ...report.results.map((r, index) => {
+        const h = r.historicalBlock;
+        return `  Endpoint ${index + 1} (${r.endpoint}): ${h.status}; attempts ${h.attempts}; number ${h.number ?? '—'}; hash ${h.hash ?? '—'}; error ${h.error ?? '—'}; skip reason ${h.skipReason ?? '—'}; observed ${h.startedMs ?? '—'}–${h.finishedMs ?? '—'}ms; duration ${h.durationMs ?? '—'}ms`;
+      }),
+      'null means no block returned; unsupported means valid JSON-RPC -32601. Errors never imply absence. Skipped means no attempt; — means unavailable.',
+      HISTORICAL_NOTE,
     ] : []),
   ].join('\n');
 }

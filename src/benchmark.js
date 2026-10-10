@@ -1,6 +1,7 @@
 import { rpcCall, parseQuantity, validateEndpoint } from './rpc.js';
 import { endpointLabels } from './labels.js';
 import { parseExpectedChain } from './network.js';
+import { parseHistoricalBlock, probeHistoricalBlock } from './historical.js';
 
 const LATENCY_NOTES = [
   'Latency n counts successful measured calls only; failed attempts remain in Errors.',
@@ -43,7 +44,7 @@ async function prepareProbe(url, label, { timeoutMs, expectedChain, warmup }, ne
     ...(expectedChain === undefined ? {} : { networkStatus: 'unknown' }),
     ...(warmup === 0 ? {} : { warmup: { attempts: 0, successes: 0, errors: {}, durationMs: 0 } }),
   };
-  const call = (method) => rpcCall(url, method, [], { timeoutMs, id: nextRequestId() });
+  const call = (method, params = []) => rpcCall(url, method, params, { timeoutMs, id: nextRequestId() });
   const probe = { result, call, latencies: [], ready: false };
   try {
     const { result: chainId } = await call('eth_chainId');
@@ -170,7 +171,7 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
 
 export async function benchmark(endpoints, {
   samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference, expectedChain, warmup = 0,
-  intervalMs = 0,
+  intervalMs = 0, historicalBlock,
 } = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
@@ -197,6 +198,7 @@ export async function benchmark(endpoints, {
     throw new Error('Reference must be an endpoint index from 1 to the selected endpoint count.');
   }
   const expected = expectedChain === undefined ? undefined : parseExpectedChain(expectedChain);
+  const historical = historicalBlock === undefined ? undefined : parseHistoricalBlock(historicalBlock);
   const names = endpointLabels(labels, endpoints.length);
   const urls = endpoints.map(validateEndpoint);
   if (new Set(urls).size !== urls.length) throw new Error('Duplicate endpoints are not allowed.');
@@ -232,6 +234,14 @@ export async function benchmark(endpoints, {
       result.status = 'degraded';
     }
   }
+  let historicalPhase;
+  if (historical !== undefined) {
+    const phaseStarted = performance.now();
+    historicalPhase = { startedMs: Math.round(phaseStarted - started), finishedMs: null, durationMs: null };
+    await runPhase(probes, workerCount, probe => probeHistoricalBlock(probe, historical, elapsedMs));
+    historicalPhase.finishedMs = elapsedMs();
+    historicalPhase.durationMs = Math.round(performance.now() - phaseStarted);
+  }
   return {
     schemaVersion: 1,
     startedAt,
@@ -243,8 +253,10 @@ export async function benchmark(endpoints, {
       ...(expected === undefined ? {} : { expectedChain: expected.toString() }),
       ...(warmup === 0 ? {} : { warmup }),
       ...(intervalMs === 0 ? {} : { intervalMs }),
+      ...(historical === undefined ? {} : { historicalBlock: historical.toString() }),
     },
     ...(intervalMs === 0 ? {} : { pacingWaitMs: Math.round(pacingWaitMs) }),
+    ...(historicalPhase === undefined ? {} : { historicalPhase }),
     latencyNotes: [...LATENCY_NOTES],
     rounds,
     results: addPeerComparison(probes.map((probe) => probe.result), { lagThreshold, reference }),
