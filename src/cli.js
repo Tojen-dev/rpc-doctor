@@ -1,3 +1,4 @@
+import { CallProbeError, parseCallOptions } from './call.js';
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { benchmark } from './benchmark.js';
@@ -29,6 +30,9 @@ Options:
   --reference <n>     Reference endpoint index, starting at 1 in the selected list
   --expected-chain <id> Require a decimal or 0x-hex chain ID (optional)
   --historical-block <n> One optional block-header lookup after samples (CLI-only)
+  --call-to <address> Explicit 20-byte target; requires --call-data and --call-block
+  --call-data <hex>   Even 0x-hex DATA, 0–4096 bytes; empty 0x allowed (CLI-only)
+  --call-block <n>    Explicit decimal/0x block, 0–2^256-1; no tags (CLI-only)
   --strict           Exit 1 when any endpoint fails the CI health policy (CLI-only)
   --max-failures <n>  Allowed failed measured calls per endpoint, 0–100 (default: 0;
                      requires --strict; CLI-only)
@@ -43,7 +47,7 @@ Options:
   --version, -v      Show version
 
 At most 20 endpoints; requests per endpoint stay sequential. No transactions sent.
-Concurrency includes handshakes, warm-up, samples and optional historical probes;
+Concurrency includes handshakes, warm-up, samples and optional historical/call probes;
 it also applies to --demo.
 All endpoints finish preparation before sampling begins. Each measured round sends
 one call per accepted endpoint and waits for all outcomes before the next round.
@@ -54,7 +58,8 @@ Slow endpoints delay all peers; observations are not synchronized.
 JSON records round boundaries and each attempt's start/finish in elapsed client ms
 from startedAt; the table shows each endpoint's first-start to last-finish window.
 Warm-up follows the network guard; failures and elapsed ms are reported separately.
-Maximum requests per endpoint: 1 + warmup + samples (+1 with --historical-block).
+Maximum requests per endpoint: 1 + warmup + samples + H + K.
+H=1 with --historical-block; K=1 with the call triplet; otherwise each is 0.
 Historical block: decimal or 0x-hex, 0–2^256-1, at most 78 characters, no leading
 zeros/signs/whitespace/tags; at most once, validated even with help/version.
 The probe calls eth_getBlockByNumber with [canonicalHex,false] after all rounds,
@@ -63,7 +68,22 @@ Failed/mismatched handshakes skip the probe. Found, null, unsupported (-32601 on
 error and skipped stay separate; only matching number and 32-byte hash are retained.
 Probe time counts in Elapsed, not sample latency; health/status/lag are unchanged.
 One header is not proof of historical state, full history, canonicality or archive support.
-CSV adds 13 columns only when enabled; otherwise its 42-column contract is unchanged.
+Historical CSV adds 13 columns only when enabled.
+Call flags are an all-or-none triplet, at most once each; validated before config,
+environment, RPC and output access, including help/version. Call block uses the
+same exact bounded grammar as historical block. No default latest or fallback.
+eth_call sends [{to,input,gas:"0x186a0",value:"0x0"},canonicalHexBlock], after all
+rounds and the optional historical phase, under the same concurrency/timeout/body cap.
+Sender is omitted (provider default); no overrides, signing or transaction submission.
+Return DATA must be even 0x-hex and <=4096 bytes. Only byte count is reported, never
+raw calldata/return/revert bytes or errors. Target is public report text.
+Success with 0 bytes differs from null/malformed results (INVALID_RESULT), skipped
+handshake/mismatch, unsupported (-32601 only), and other errors (reverts: RPC_ERROR).
+Gas cap 100000 may be insufficient; omitted sender may change behavior. A success
+proves neither contract presence, ABI correctness, safety, canonicality/finality,
+archive support nor state agreement. Baseline/strict unchanged; time adds to Elapsed.
+CSV appends 16 call columns after any historical columns: 42/55/58/71 total for
+neither/historical/call/both. Call failures still produce complete reports.
 Use environment input for API-key URLs to avoid storing them in shell history.
 Labels also name environment URLs; with --demo, supply three labels or none.
 Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
@@ -128,6 +148,7 @@ export async function main(args, env, stdout, stderr) {
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
         'expected-chain': { type: 'string' },
         'historical-block': { type: 'string' },
+        'call-to': { type: 'string' }, 'call-data': { type: 'string' }, 'call-block': { type: 'string' },
         strict: { type: 'boolean' }, 'max-failures': { type: 'string' },
         label: { type: 'string', multiple: true },
         json: { type: 'boolean' }, csv: { type: 'boolean' }, markdown: { type: 'boolean' }, demo: { type: 'boolean' },
@@ -143,6 +164,12 @@ export async function main(args, env, stdout, stderr) {
       throw new HistoricalBlockError('Use --historical-block at most once.');
     }
     const historicalBlock = values['historical-block'] === undefined ? undefined : parseHistoricalBlock(values['historical-block']).toString();
+    for (const name of ['call-to', 'call-data', 'call-block']) {
+      if (parsed.tokens.filter(t => t.kind === 'option' && t.name === name).length > 1) {
+        throw new CallProbeError('Use --call-to, --call-data and --call-block together, once each.');
+      }
+    }
+    const callRequest = parseCallOptions({ callTo: values['call-to'], callData: values['call-data'], callBlock: values['call-block'] });
     if (values.help) { stdout.write(help); return 0; }
     if (values.version) {
       const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -185,6 +212,7 @@ export async function main(args, env, stdout, stderr) {
       reference: values.reference === undefined ? config.reference : Number(values.reference),
       expectedChain: values['expected-chain'] === undefined ? config.expectedChain : values['expected-chain'],
       labels: values.label,
+      ...(callRequest === undefined ? {} : { callTo: callRequest.to, callData: callRequest.input, callBlock: callRequest.block.toString() }),
       ...(historicalBlock === undefined ? {} : { historicalBlock }),
     };
     if (endpoints.length === 0 && config.endpoints !== undefined) {
@@ -219,7 +247,7 @@ export async function main(args, env, stdout, stderr) {
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
     const expected = /^(Use |Provide |Samples |Warm-up |Interval |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
-    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
+    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || error instanceof CallProbeError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }
 }

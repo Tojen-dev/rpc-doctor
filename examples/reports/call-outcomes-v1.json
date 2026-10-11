@@ -1,0 +1,236 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-11T00:00:00.000Z",
+  "generatedAt": "2026-10-11T00:00:00.003Z",
+  "durationMs": 3,
+  "settings": {
+    "samples": 1,
+    "timeoutMs": 1000,
+    "concurrency": 5,
+    "lagThreshold": 3,
+    "call": {
+      "to": "0xabababababababababababababababababababab",
+      "block": "9007199254740993",
+      "gas": 100000,
+      "value": "0",
+      "inputBytes": 4096
+    }
+  },
+  "callPhase": {
+    "startedMs": 2,
+    "finishedMs": 3,
+    "durationMs": 1
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "startedMs": 1,
+      "finishedMs": 2
+    }
+  ],
+  "latencyNotes": [
+    "Synthetic fixture: one sample does not establish stability."
+  ],
+  "results": [
+    {
+      "endpoint": "Empty DATA",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 4,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "call": {
+        "status": "success",
+        "attempts": 1,
+        "returnBytes": 0,
+        "error": null,
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Maximum DATA",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 4,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "call": {
+        "status": "success",
+        "attempts": 1,
+        "returnBytes": 4096,
+        "error": null,
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Method unavailable",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 4,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "call": {
+        "status": "unsupported",
+        "attempts": 1,
+        "returnBytes": null,
+        "error": "RPC_ERROR",
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "RPC failure",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 4,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "call": {
+        "status": "error",
+        "attempts": 1,
+        "returnBytes": null,
+        "error": "RPC_ERROR",
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Invalid result",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 4,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "call": {
+        "status": "error",
+        "attempts": 1,
+        "returnBytes": null,
+        "error": "INVALID_RESULT",
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    }
+  ]
+}

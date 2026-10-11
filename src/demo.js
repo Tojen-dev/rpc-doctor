@@ -11,7 +11,7 @@ export async function runDemo(options) {
         let body = '';
         for await (const chunk of req) {
           body += chunk;
-          if (body.length > 4096) { res.writeHead(413).end(); return; }
+          if (body.length > 12 * 1024) { res.writeHead(413).end(); return; }
         }
         let request;
         try { request = JSON.parse(body); }
@@ -22,6 +22,12 @@ export async function runDemo(options) {
           return;
         }
         res.setHeader('content-type', 'application/json');
+        if (request.method === 'eth_call') {
+          const outcome = delay === 5 ? { result: '0x' } : delay === 35 ? { result: '0xabcd' }
+            : { error: { code: 3, message: 'Synthetic execution reverted.', data: '0xdeadbeef' } };
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...outcome }));
+          return;
+        }
         if (request.method === 'eth_getBlockByNumber') {
           const historical = delay === 5 ? { result: { number: request.params[0], hash: `0x${'ab'.repeat(32)}` } }
             : delay === 35 ? { result: null } : { error: { code: -32601, message: 'Synthetic method unavailable.' } };

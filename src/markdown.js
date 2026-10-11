@@ -1,3 +1,4 @@
+import { CALL_NOTE } from './call.js';
 import { HISTORICAL_NOTE } from './historical.js';
 
 // Dynamic content is always plain text, never Markdown syntax or inline code.
@@ -108,6 +109,23 @@ export function formatMarkdown(report) {
         })),
       'found means a matching number and valid 32-byte hash were returned; null means no block returned; unsupported means valid JSON-RPC -32601. Other failures are error, not absence or unsupported. skipped means handshake_failed or network_mismatch, with no attempt. An em dash means unavailable, not zero or success.',
       HISTORICAL_NOTE);
+  }
+  if (settings.call !== undefined) {
+    sections.push('## Read-only call probe',
+      table(['Setting', 'Value'], [
+        ['Target (public input)', settings.call.to], ['Block (decimal)', settings.call.block],
+        ['Gas cap', settings.call.gas], ['Value (wei)', settings.call.value], ['Input bytes', settings.call.inputBytes],
+        ['Phase start (ms from run start)', report.callPhase.startedMs],
+        ['Phase finish (ms from run start)', report.callPhase.finishedMs], ['Phase elapsed (ms)', report.callPhase.durationMs],
+      ]),
+      'One eth_call per accepted endpoint after all measured rounds and the optional historical phase. The same concurrency, whole-body timeout and body limit apply. Attempt timings include failures and validation, excluding queue wait; phase elapsed includes scheduling. These client offsets and durations count in whole-run elapsed, never measured latency. No retry, block substitution or fallback occurs.',
+      table(['Index', 'Outcome', 'Attempts', 'Return bytes', 'Error', 'Skip reason', 'Start (ms)', 'Finish (ms)', 'Duration (ms)'],
+        results.map((r, i) => {
+          const c = r.call;
+          return [i + 1, c.status, c.attempts, c.returnBytes, c.error, c.skipReason, c.startedMs, c.finishedMs, c.durationMs];
+        })),
+      'success with zero return bytes means valid empty DATA; null, malformed or oversize DATA are errors. Only valid JSON-RPC -32601 is unsupported. Other RPC errors, including reverts, remain RPC_ERROR; provider text is never interpreted. skipped means handshake_failed or network_mismatch without a request. An em dash means unavailable, not zero or success. Raw calldata, return bytes and revert data are omitted.',
+      CALL_NOTE);
   }
   sections.push('Endpoint URLs, credentials, headers, and raw provider messages are omitted. Labels are public text; do not put secrets in labels.');
   return sections.join('\n\n') + '\n';

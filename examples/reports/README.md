@@ -37,3 +37,16 @@ npm run validate:report -- examples/reports/failure-v1.json
 The second command succeeds: a valid report can describe a complete RPC failure.
 These examples and the schema are included by `npm pack`; the validation helper
 and Ajv are development tools in the source checkout, not runtime CLI requirements.
+
+### Read-only call fixtures (2026-10-11)
+
+- `call-outcomes-v1.json`: independently authored call-only report with five healthy
+  baselines and empty DATA, maximum 4096-byte DATA, unsupported, RPC error and invalid
+  result outcomes. The requested block exceeds JavaScript's safe integer range.
+- `call-skipped-v1.json`: independently authored combined historical/call report
+  with failed handshake and rejected network. Both phases have zero attempts,
+  null attempt timings, explicit skip reasons and zero-duration phase boundaries.
+
+These synthetic fixtures contain only public metadata, no raw calldata/return/revert
+bytes. Illustrative timings and dates are not measured observations. They were not
+produced by the benchmark or captured from providers; tests assert known values.

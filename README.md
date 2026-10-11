@@ -41,7 +41,8 @@ node bin/rpc-doctor.js --samples 10 --timeout 3000 \
 Replace the example URLs with your provider endpoints. Local nodes are supported.
 Baseline measurements send only `eth_chainId` and `eth_blockNumber`.
 The opt-in `--historical-block` probe also sends `eth_getBlockByNumber` once per
-accepted endpoint after all measured rounds.
+accepted endpoint after all measured rounds. The opt-in call triplet sends one
+`eth_call` after sampling and the optional historical phase.
 No transaction submission or signing is performed.
 
 For endpoint URLs containing credentials, populate `RPC_DOCTOR_ENDPOINTS_JSON` via
@@ -197,7 +198,7 @@ Five samples make a quick check, not a statistically robust p95 or p99 benchmark
 
 Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including
 chain handshakes, optional warm-up, block samples and the optional historical
-probe. Each endpoint's requests remain sequential.
+and call probes. Each endpoint's requests remain sequential.
 A preparation worker finishes one endpoint's handshake and warm-up before moving
 to the next endpoint. Measured workers instead perform one attempt per endpoint
 per round, with a barrier after preparation and after every round.
@@ -595,6 +596,9 @@ The existing report and error categories remain available in both formats.
 | `--reference <n>` | Peer maximum | 1-based index in selected URL list; same-chain comparisons only, no fallback |
 | `--expected-chain <id>` | None | Decimal or `0x`-hex ID, 0–2^256−1; reject other networks before block samples |
 | `--historical-block <n>` | None | CLI-only: one optional block lookup after measured rounds; decimal/`0x` integer 0–2^256−1, at most once |
+| `--call-to <address>` | None | CLI-only: 20-byte hex target; requires the full call triplet, once each |
+| `--call-data <hex>` | None | CLI-only: `0x` + even hex digits, 0–4096 bytes; sent as RPC `input` |
+| `--call-block <n>` | None | CLI-only: explicit decimal/`0x` block 0–2^256−1; no tags or default |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
 | `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
@@ -609,13 +613,14 @@ The existing report and error categories remain available in both formats.
 
 Supply 1–20 distinct HTTP(S) URLs. URL userinfo, fragments, and redirects are refused.
 Response bodies are limited to 1 MiB. Each endpoint receives at most
-**`1 + warmup + samples + H` requests**, where `H=1` only with `--historical-block`,
-otherwise `H=0` (handshake, warm-up, measured samples, optional probe).
+**`1 + warmup + samples + H + K` requests**, where `H=1` only with
+`--historical-block`, and `K=1` only with the complete call triplet; otherwise each
+is zero (handshake, warm-up, measured samples, optional probes).
 Failed or mismatched handshakes stop after one request; later failures do not
 reduce the configured attempt count. Warm-up adds up to `warmup × timeout` ms of
 request waiting per accepted endpoint, plus processing overhead. With concurrency
 `C` and `E` selected endpoints, a conservative request-time allowance remains
-`ceil(E / C) × (1 + warmup + samples + H) × timeout` ms. The optional probe adds at
+`ceil(E / C) × (1 + warmup + samples + H + K) × timeout` ms. Each optional probe adds at
 most one timeout per accepted endpoint, scheduled in its own bounded phase.
 When planning a paced run,
 allow up to `(samples - 1) × interval` ms of additional deliberate waiting, plus
@@ -690,8 +695,9 @@ cryptographic authenticity. Extra fields, whole blocks, raw errors/messages,
 transaction lists, endpoint URLs and headers are never retained in the report.
 
 **A found header does not establish historical state access, coverage of other
-blocks, canonicality, freshness or archive-node support.** No state or contract
-call is made. Probe results do not change baseline attempts/successes/errors,
+blocks, canonicality, freshness or archive-node support.** The historical probe
+itself makes no state or contract call. Probe results do not change baseline
+attempts/successes/errors,
 warm-up, measured latency statistics, latest block, lag, status or strict policy.
 An optional probe error can accompany a healthy baseline and exit `0`; a found
 header cannot rescue failed baseline samples from exit `1`. Whole-run elapsed
@@ -723,7 +729,8 @@ The CLI performs the request/response semantic checks.
 Table and Markdown append a separate historical section with request, phase
 timing, each outcome, projection, errors/skip reasons and limitations. CSV retains
 its original 42 columns in the same order, then appends these **13 columns only
-when enabled** (55 total). Existing CSV quoting/formula protection still applies;
+when enabled** (55 total without the call probe). Existing CSV quoting/formula
+protection still applies;
 null fields are empty, while real zero is `0`.
 
 | Column | Meaning |
@@ -743,8 +750,150 @@ null fields are empty, while real zero is `0`.
 | 55 `historical_phase_duration_ms` | Phase elapsed, repeated |
 
 Use CSV header names; consumers requiring exactly 42 columns should omit the
-flag. In the synthetic demo, the three optional outcomes are found, null and
+probe flags. In the synthetic demo, the three optional outcomes are found, null and
 unsupported respectively, independently of measured rate limiting and lag.
+
+## Optional read-only call probe
+
+Provide **all three** CLI-only flags exactly once: `--call-to ADDRESS`,
+`--call-data HEX`, and `--call-block BLOCK`. There are no config equivalents.
+Incomplete/repeated flags, missing values and invalid boundaries return exit `2`
+before config/environment resolution, RPC or output filesystem access, including
+with help/version. Valid help/version still skip those operations.
+
+```sh
+# Synthetic endpoints only; the zero address is an illustrative public target.
+node bin/rpc-doctor.js --demo --call-to 0x0000000000000000000000000000000000000000 \
+  --call-data 0x --call-block 0 --json
+```
+
+Target is exactly `0x` followed by 40 hex digits (20 bytes). Data is `0x` plus an
+even number of hex digits, **0–4096 decoded bytes**, inclusive; `0x` is valid
+empty input. The lowercase prefix is required; hex digits may have either case
+and are normalized to lowercase. No address checksum validation or ABI encoding
+is performed. Target is **public report input**. Calldata is sent to every
+accepted endpoint and remains in process memory while needed, but is omitted
+from reports; avoid secrets in command-line arguments and shell history.
+
+Block uses the exact expected-chain grammar: canonical unsigned decimal or
+`0x` quantity, 0 through 2^256−1, at most 78 input characters, with no leading
+zeros, signs, whitespace, fractions, exponents or tags. Large integers remain
+exact. There is no implicit `latest`, block search, substitution or comparison.
+
+The single request uses these two parameters (with the user's normalized values):
+
+```js
+[{ to: address, input: calldata, gas: "0x186a0", value: "0x0" }, canonicalHexBlock]
+```
+
+`--call-data` maps to the current specification's `input` field. Gas is fixed at
+**100000** and value at **zero wei**. There is no `from`, gas/fee override, state
+override, arbitrary method, retry or RPC fallback. This follows
+[Ethereum's eth_call API](https://ethereum.org/developers/docs/apis/json-rpc/#eth_call)
+and the [execution-apis method](https://github.com/ethereum/execution-apis/blob/main/src/eth/execute.yaml)
+and [transaction schema](https://github.com/ethereum/execution-apis/blob/main/src/schemas/transaction.yaml).
+The sender is omitted: the provider chooses its default, so caller-dependent
+execution and other unspecified transaction defaults may differ across clients.
+No wallet account is selected. This is simulated execution without signing,
+transaction submission, persistent on-chain writes or transfer of funds; it can
+still consume provider resources and quota. A function need not be declared
+`view` to be simulated. The small gas cap may reject otherwise executable calls.
+
+After all measured rounds and, when enabled, the complete historical phase,
+each handshake/guard-accepted endpoint receives **one** `eth_call`, even if all
+its measured samples failed. Failed handshakes and mismatches are explicitly
+skipped. Calls share the existing concurrency pool, unique request IDs,
+whole-body timeout and 1 MiB response limit. Complete bodies and result validation
+finish before a worker is released. A timeout cannot guarantee that the provider
+stops processing. Return DATA must be a string with lowercase `0x` prefix, an
+even number of hex digits, and at most 4096 decoded bytes. Only its byte count
+is retained; unknown response fields and raw input/return/revert data and errors
+are discarded, as are endpoint URLs and headers.
+
+| Call status | Meaning |
+| --- | --- |
+| `success` | Valid bounded DATA; `returnBytes: 0` means successful empty `0x`, not null |
+| `unsupported` | Only a valid matching-ID JSON-RPC error with integer code `-32601`; `error: RPC_ERROR` |
+| `error` | All other failures: null/malformed/over-4096-byte DATA is `INVALID_RESULT`; invalid envelopes are `INVALID_RESPONSE`; HTTP, 429, network, body limit and timeout keep their existing categories |
+| `skipped` | No request; `skipReason` is `handshake_failed` or `network_mismatch` |
+
+Reverts (including execution-apis code `3`), invalid params, pruned-state and other
+valid RPC errors remain `error` / `RPC_ERROR`. Provider message text and revert
+data are never interpreted to guess a revert, absence, unsupported method or
+empty success. A whole body over 1 MiB is `RESPONSE_TOO_LARGE`, independently of
+the smaller DATA bound.
+
+Success does **not** establish contract presence (an account without code may
+return empty DATA), ABI correctness, safety, canonicality, finality, freshness,
+archive support or identical state between endpoints. A numeric block does not
+pin a block hash; forks/reorganizations may yield different state. No code
+lookup, ABI decoding or return-value comparison is attempted.
+
+Baseline attempts/errors, warm-up, rounds, pacing, latency, block/lag/status and
+strict policy are unchanged. Optional call failure can accompany baseline health
+exit `0`; call success cannot rescue failed measurements from exit `1`. Whole-run
+elapsed and generation time include the new phase. All four formats and atomic
+output include the complete call result on health `0`/`1`; file errors retain
+exit `2` and the existing atomic-publication contract.
+
+### Call report fields and CSV columns
+
+Only enabled runs add optional v1 fields: `settings.call` holds lowercase `to`,
+exact decimal `block`, numeric `gas: 100000`, decimal `value: "0"`, and integer
+`inputBytes` (0–4096). `callPhase` holds rounded nonnegative `startedMs`,
+`finishedMs`, and `durationMs`, including worker scheduling. Each `results[].call`
+holds `status`, `attempts` (0 skipped, otherwise 1), nullable `returnBytes`
+(0–4096 only on success), safe `error`, `skipReason`, and nullable `startedMs`,
+`finishedMs`, `durationMs`. Attempt timing includes failures and validation but
+excludes queue wait; all three are null when skipped. Offsets use the same run
+start as measured observations. Overlapping durations must not be summed; an
+all-skipped phase has boundaries and may have zero duration. Null is unavailable.
+
+Schema v1 validates known fields and bounds, including the fixed gas/value,
+while permitting future additional properties. It does not check exact uint256
+range beyond the decimal format/78-digit bound, feature co-occurrence, timing
+arithmetic, or status/attempt/error consistency. CLI semantic validation is
+separate. Older fixtures remain valid. New fixtures are independently authored
+synthetic examples, never live provider output.
+
+Table and Markdown append a separate call section with settings, timings,
+outcomes and limits; dynamic Markdown text stays inert. CSV preserves the
+original 42 columns, then the 13 historical columns **if enabled**, then these
+16 call columns **if enabled**, in this fixed order:
+
+| Call-only position (both probes) | Column |
+| --- | --- |
+| 43 (56) | `call_to` |
+| 44 (57) | `call_block` |
+| 45 (58) | `call_gas` |
+| 46 (59) | `call_value` |
+| 47 (60) | `call_input_bytes` |
+| 48 (61) | `call_status` |
+| 49 (62) | `call_attempts` |
+| 50 (63) | `call_return_bytes` |
+| 51 (64) | `call_error` |
+| 52 (65) | `call_skip_reason` |
+| 53 (66) | `call_started_ms` |
+| 54 (67) | `call_finished_ms` |
+| 55 (68) | `call_duration_ms` |
+| 56 (69) | `call_phase_started_ms` |
+| 57 (70) | `call_phase_finished_ms` |
+| 58 (71) | `call_phase_duration_ms` |
+
+Totals are **42 / 55 / 58 / 71** for neither / historical / call / both probes.
+Use header names. Nulls are empty, actual zeros remain `0`, and existing quoting
+and formula-prefix protection apply. Without the call flags, existing output
+bytes, fields and requests remain unchanged, including historical-only reports.
+The demo returns empty success, two-byte success and an RPC revert respectively,
+without changing measured-rate-limit counters or historical outcomes.
+
+Input DATA uses at most 8194 hex characters; the complete bounded request fits
+within 12 KiB (also the demo's request cap). Per active response, the existing
+1 MiB body bound applies before parsing, with temporary buffer/string/JSON copies;
+this is not a process-memory cap. Valid return DATA has at most 8194 characters
+and is reduced to a count. Reports add only bounded metadata per endpoint.
+The request-time allowance above includes each optional phase, plus overhead and
+pacing; it is not an enforced whole-run deadline.
 
 ## Atomic report files
 
@@ -860,7 +1009,8 @@ on stderr and no fabricated CSV report; Ctrl+C remains `130`. Preserve the comma
 exit code in CI rather than inferring success from a readable CSV file.
 
 The byte format is UTF-8 without a BOM, comma-separated, with one header and **42
-fields in every record by default**, or 55 with `--historical-block` as documented
+fields in every record by default**, 55 with historical only, 58 with call only,
+or 71 with both probes, as documented
 above. Every field is double-quoted; embedded quotes are doubled,
 and embedded CR/LF remain inside the quoted field. Records end with CRLF, including
 the final record, with no extra blank record. The CSV follows the quoting and record
@@ -914,7 +1064,7 @@ precision instead of the table's one-decimal display.
 | 34 | `pacing_wait_ms` | Actual total explicit pacing wait; empty at zero/off interval |
 | 35 | `started_at` | UTC ISO run-start timestamp |
 | 36 | `generated_at` | UTC ISO report-generation timestamp |
-| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and the optional historical phase |
+| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and optional historical/call phases |
 | 38 | `demo` | true for the local synthetic demo; empty otherwise |
 | 39 | `strict_passed` | **Whole-run** strict result, true/false; empty if disabled |
 | 40 | `strict_max_failures` | Allowed measured failures per endpoint; empty if strict disabled |
@@ -1125,8 +1275,9 @@ Later additions are optional for compatibility: `startedAt`, `rounds`,
 `observations`, `latencyNotes`, `latencySampleCount`, `stddev`, `p99`, and
 `healthPolicy`. The optional historical probe adds `settings.historicalBlock`,
 `historicalPhase` and each result's `historicalBlock`; old reports need none of
-these fields. Reference/network/warm-up/pacing fields and `demo` are optional
-because they depend on selected options. **Every known field is checked when
+these fields. The call probe likewise adds optional `settings.call`, `callPhase`
+and `results[].call`, with required members when present.
+Reference/network/warm-up/pacing fields and `demo` are optional because they depend on selected options. **Every known field is checked when
 present**; an optional object still needs its required members. Current output
 omits warm-up/pacing settings at zero; if present, `warmup` and `intervalMs` must
 be positive. `pacingWaitMs` may be zero. `demo`, when present, is `true`.

@@ -1,3 +1,4 @@
+import { parseCallOptions, probeCall, CALL_GAS } from './call.js';
 import { rpcCall, parseQuantity, validateEndpoint } from './rpc.js';
 import { endpointLabels } from './labels.js';
 import { parseExpectedChain } from './network.js';
@@ -171,7 +172,7 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
 
 export async function benchmark(endpoints, {
   samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference, expectedChain, warmup = 0,
-  intervalMs = 0, historicalBlock,
+  intervalMs = 0, historicalBlock, callTo, callData, callBlock,
 } = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
@@ -199,6 +200,7 @@ export async function benchmark(endpoints, {
   }
   const expected = expectedChain === undefined ? undefined : parseExpectedChain(expectedChain);
   const historical = historicalBlock === undefined ? undefined : parseHistoricalBlock(historicalBlock);
+  const callRequest = parseCallOptions({ callTo, callData, callBlock });
   const names = endpointLabels(labels, endpoints.length);
   const urls = endpoints.map(validateEndpoint);
   if (new Set(urls).size !== urls.length) throw new Error('Duplicate endpoints are not allowed.');
@@ -242,6 +244,14 @@ export async function benchmark(endpoints, {
     historicalPhase.finishedMs = elapsedMs();
     historicalPhase.durationMs = Math.round(performance.now() - phaseStarted);
   }
+  let callPhase;
+  if (callRequest !== undefined) {
+    const phaseStarted = performance.now();
+    callPhase = { startedMs: Math.round(phaseStarted - started), finishedMs: null, durationMs: null };
+    await runPhase(probes, workerCount, probe => probeCall(probe, callRequest, elapsedMs));
+    callPhase.finishedMs = elapsedMs();
+    callPhase.durationMs = Math.round(performance.now() - phaseStarted);
+  }
   return {
     schemaVersion: 1,
     startedAt,
@@ -253,10 +263,15 @@ export async function benchmark(endpoints, {
       ...(expected === undefined ? {} : { expectedChain: expected.toString() }),
       ...(warmup === 0 ? {} : { warmup }),
       ...(intervalMs === 0 ? {} : { intervalMs }),
+      ...(callRequest === undefined ? {} : { call: {
+        to: callRequest.to, block: callRequest.block.toString(), gas: CALL_GAS, value: '0',
+        inputBytes: (callRequest.input.length - 2) / 2,
+      } }),
       ...(historical === undefined ? {} : { historicalBlock: historical.toString() }),
     },
     ...(intervalMs === 0 ? {} : { pacingWaitMs: Math.round(pacingWaitMs) }),
     ...(historicalPhase === undefined ? {} : { historicalPhase }),
+    ...(callPhase === undefined ? {} : { callPhase }),
     latencyNotes: [...LATENCY_NOTES],
     rounds,
     results: addPeerComparison(probes.map((probe) => probe.result), { lagThreshold, reference }),

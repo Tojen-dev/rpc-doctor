@@ -62,7 +62,7 @@ const columns = [
 ];
 
 export function formatCsv(report) {
-  const selected = report.settings.historicalBlock === undefined ? columns : [...columns,
+  const selected = report.settings.historicalBlock === undefined ? [...columns] : [...columns,
     ['historical_requested_block', (r, report) => report.settings.historicalBlock],
     ['historical_status', r => r.historicalBlock.status],
     ['historical_attempts', r => r.historicalBlock.attempts],
@@ -77,6 +77,24 @@ export function formatCsv(report) {
     ['historical_phase_finished_ms', (r, report) => report.historicalPhase.finishedMs],
     ['historical_phase_duration_ms', (r, report) => report.historicalPhase.durationMs],
   ];
+  if (report.settings.call !== undefined) selected.push(
+    ['call_to', (r, report) => report.settings.call.to],
+    ['call_block', (r, report) => report.settings.call.block],
+    ['call_gas', (r, report) => report.settings.call.gas],
+    ['call_value', (r, report) => report.settings.call.value],
+    ['call_input_bytes', (r, report) => report.settings.call.inputBytes],
+    ['call_status', r => r.call.status],
+    ['call_attempts', r => r.call.attempts],
+    ['call_return_bytes', r => r.call.returnBytes],
+    ['call_error', r => r.call.error],
+    ['call_skip_reason', r => r.call.skipReason],
+    ['call_started_ms', r => r.call.startedMs],
+    ['call_finished_ms', r => r.call.finishedMs],
+    ['call_duration_ms', r => r.call.durationMs],
+    ['call_phase_started_ms', (r, report) => report.callPhase.startedMs],
+    ['call_phase_finished_ms', (r, report) => report.callPhase.finishedMs],
+    ['call_phase_duration_ms', (r, report) => report.callPhase.durationMs],
+  );
   const rows = [selected.map(([name]) => name),
     ...report.results.map((result, index) => selected.map(([, get]) => get(result, report, index)))];
   return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';

@@ -1,3 +1,4 @@
+import { CALL_NOTE } from './call.js';
 import { HISTORICAL_NOTE } from './historical.js';
 
 export function formatTable(report) {
@@ -70,6 +71,16 @@ export function formatTable(report) {
       }),
       'null means no block returned; unsupported means valid JSON-RPC -32601. Errors never imply absence. Skipped means no attempt; — means unavailable.',
       HISTORICAL_NOTE,
+    ] : []),
+    ...(report.settings.call !== undefined ? ['',
+      `Read-only call: target ${report.settings.call.to}; block ${report.settings.call.block}; gas ${report.settings.call.gas}; value ${report.settings.call.value}; input bytes ${report.settings.call.inputBytes}`,
+      `Call phase: ${report.callPhase.startedMs}–${report.callPhase.finishedMs}ms from start; elapsed ${report.callPhase.durationMs}ms (included in Elapsed).`,
+      ...report.results.map((r, index) => {
+        const c = r.call;
+        return `  Endpoint ${index + 1} (${r.endpoint}): ${c.status}; attempts ${c.attempts}; return bytes ${c.returnBytes ?? '—'}; error ${c.error ?? '—'}; skip reason ${c.skipReason ?? '—'}; observed ${c.startedMs ?? '—'}–${c.finishedMs ?? '—'}ms; duration ${c.durationMs ?? '—'}ms`;
+      }),
+      'success with 0 bytes means valid empty DATA; null/malformed/oversize results are errors. Only valid JSON-RPC -32601 is unsupported; other RPC errors, including reverts, stay RPC_ERROR. Skipped means no attempt; — means unavailable. Raw input/return bytes are omitted.',
+      CALL_NOTE,
     ] : []),
   ].join('\n');
 }

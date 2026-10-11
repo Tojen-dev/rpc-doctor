@@ -16,6 +16,7 @@
     "demo": { "const": true },
     "pacingWaitMs": { "$ref": "#/$defs/elapsedMs" },
     "historicalPhase": { "$ref": "#/$defs/historicalPhase" },
+    "callPhase": { "$ref": "#/$defs/callPhase" },
     "latencyNotes": { "$ref": "#/$defs/notes" },
     "rounds": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/round" } },
     "healthPolicy": { "$ref": "#/$defs/healthPolicy" }
@@ -57,6 +58,7 @@
         "lagThreshold": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "reference": { "$ref": "#/$defs/endpointIndex" },
         "expectedChain": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
+        "call": { "$ref": "#/$defs/callSettings" },
         "historicalBlock": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
         "warmup": { "type": "integer", "minimum": 1, "maximum": 20 },
         "intervalMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
@@ -84,6 +86,43 @@
         "successes": { "type": "integer", "minimum": 0, "maximum": 20 },
         "errors": { "$ref": "#/$defs/errors" },
         "durationMs": { "$ref": "#/$defs/elapsedMs" }
+      }
+    },
+    "callSettings": {
+      "type": "object",
+      "required": ["to", "block", "gas", "value", "inputBytes"],
+      "additionalProperties": true,
+      "properties": {
+        "to": { "type": "string", "pattern": "^0x[0-9a-f]{40}(?![\\s\\S])" },
+        "block": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
+        "gas": { "const": 100000 },
+        "value": { "const": "0" },
+        "inputBytes": { "type": "integer", "minimum": 0, "maximum": 4096 }
+      }
+    },
+    "callPhase": {
+      "type": "object",
+      "required": ["startedMs", "finishedMs", "durationMs"],
+      "additionalProperties": true,
+      "properties": {
+        "startedMs": { "$ref": "#/$defs/elapsedMs" },
+        "finishedMs": { "$ref": "#/$defs/elapsedMs" },
+        "durationMs": { "$ref": "#/$defs/elapsedMs" }
+      }
+    },
+    "call": {
+      "type": "object",
+      "required": ["status", "attempts", "returnBytes", "error", "skipReason", "startedMs", "finishedMs", "durationMs"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "enum": ["success", "unsupported", "error", "skipped"] },
+        "attempts": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "returnBytes": { "type": ["integer", "null"], "minimum": 0, "maximum": 4096 },
+        "error": { "anyOf": [{ "$ref": "#/$defs/errorCode" }, { "type": "null" }] },
+        "skipReason": { "enum": [null, "handshake_failed", "network_mismatch"] },
+        "startedMs": { "type": ["integer", "null"], "minimum": 0 },
+        "finishedMs": { "type": ["integer", "null"], "minimum": 0 },
+        "durationMs": { "type": ["integer", "null"], "minimum": 0 }
       }
     },
     "historicalPhase": {
@@ -155,6 +194,7 @@
         "lagStatus": { "enum": ["reference", "compared", "ahead", "reference_unavailable", "reference_mismatch", "different_chain", "no_data", "network_mismatch"] },
         "warmup": { "$ref": "#/$defs/warmup" },
         "historicalBlock": { "$ref": "#/$defs/historicalBlock" },
+        "call": { "$ref": "#/$defs/call" },
         "observations": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/observation" } }
       }
     },
