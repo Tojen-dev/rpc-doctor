@@ -22,6 +22,17 @@ export async function runDemo(options) {
           return;
         }
         res.setHeader('content-type', 'application/json');
+        if (request.method === 'eth_getLogs') {
+          const filter = request.params[0];
+          const outcome = delay === 5 ? { result: [{
+            removed: false, logIndex: '0x0', transactionIndex: '0x0',
+            transactionHash: `0x${'ab'.repeat(32)}`, blockHash: `0x${'cd'.repeat(32)}`,
+            blockNumber: filter.fromBlock, address: filter.address ?? `0x${'12'.repeat(20)}`,
+            data: '0xabcd', topics: filter.topics ?? [],
+          }] } : delay === 35 ? { result: [] } : { error: { code: -32601, message: 'Synthetic method unavailable.' } };
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...outcome }));
+          return;
+        }
         if (request.method === 'eth_call') {
           const outcome = delay === 5 ? { result: '0x' } : delay === 35 ? { result: '0xabcd' }
             : { error: { code: 3, message: 'Synthetic execution reverted.', data: '0xdeadbeef' } };

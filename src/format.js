@@ -1,3 +1,4 @@
+import { LOGS_NOTE } from './logs.js';
 import { CALL_NOTE } from './call.js';
 import { HISTORICAL_NOTE } from './historical.js';
 
@@ -81,6 +82,16 @@ export function formatTable(report) {
       }),
       'success with 0 bytes means valid empty DATA; null/malformed/oversize results are errors. Only valid JSON-RPC -32601 is unsupported; other RPC errors, including reverts, stay RPC_ERROR. Skipped means no attempt; — means unavailable. Raw input/return bytes are omitted.',
       CALL_NOTE,
+    ] : []),
+    ...(report.settings.logs !== undefined ? ['',
+      `Log probe: blocks ${report.settings.logs.fromBlock}–${report.settings.logs.toBlock} inclusive; address ${report.settings.logs.address ?? 'Any'}; topic0 ${report.settings.logs.topic0 ?? 'Any'}`,
+      `Logs phase: ${report.logsPhase.startedMs}–${report.logsPhase.finishedMs}ms from start; elapsed ${report.logsPhase.durationMs}ms (included in Elapsed).`,
+      ...report.results.map((r, index) => {
+        const l = r.logs;
+        return `  Endpoint ${index + 1} (${r.endpoint}): ${l.status}; attempts ${l.attempts}; logs ${l.logCount ?? '—'}; removed ${l.removedCount ?? '—'}; error ${l.error ?? '—'}; skip reason ${l.skipReason ?? '—'}; observed ${l.startedMs ?? '—'}–${l.finishedMs ?? '—'}ms; duration ${l.durationMs ?? '—'}ms`;
+      }),
+      'Empty array is success with 0 logs. Invalid/oversize results are errors without partial counts; only valid JSON-RPC -32601 is unsupported. Skipped means no request; — means unavailable. Raw logs are omitted.',
+      LOGS_NOTE,
     ] : []),
   ].join('\n');
 }

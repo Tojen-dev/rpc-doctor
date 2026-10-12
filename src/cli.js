@@ -1,3 +1,4 @@
+import { LogsProbeError, parseLogsOptions } from './logs.js';
 import { CallProbeError, parseCallOptions } from './call.js';
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
@@ -33,6 +34,10 @@ Options:
   --call-to <address> Explicit 20-byte target; requires --call-data and --call-block
   --call-data <hex>   Even 0x-hex DATA, 0–4096 bytes; empty 0x allowed (CLI-only)
   --call-block <n>    Explicit decimal/0x block, 0–2^256-1; no tags (CLI-only)
+  --logs-from <n>    Explicit first block; requires --logs-to (CLI-only)
+  --logs-to <n>      Explicit last block; inclusive range of 1–100 blocks (CLI-only)
+  --logs-address <a> Optional single 20-byte hex filter; requires log range
+  --logs-topic0 <h>  Optional single 32-byte hex topic0; requires log range
   --strict           Exit 1 when any endpoint fails the CI health policy (CLI-only)
   --max-failures <n>  Allowed failed measured calls per endpoint, 0–100 (default: 0;
                      requires --strict; CLI-only)
@@ -47,7 +52,7 @@ Options:
   --version, -v      Show version
 
 At most 20 endpoints; requests per endpoint stay sequential. No transactions sent.
-Concurrency includes handshakes, warm-up, samples and optional historical/call probes;
+Concurrency includes handshakes, warm-up, samples and optional historical/call/log probes;
 it also applies to --demo.
 All endpoints finish preparation before sampling begins. Each measured round sends
 one call per accepted endpoint and waits for all outcomes before the next round.
@@ -58,8 +63,9 @@ Slow endpoints delay all peers; observations are not synchronized.
 JSON records round boundaries and each attempt's start/finish in elapsed client ms
 from startedAt; the table shows each endpoint's first-start to last-finish window.
 Warm-up follows the network guard; failures and elapsed ms are reported separately.
-Maximum requests per endpoint: 1 + warmup + samples + H + K.
-H=1 with --historical-block; K=1 with the call triplet; otherwise each is 0.
+Maximum requests per endpoint: 1 + warmup + samples + H + K + L.
+H=1 with --historical-block; K=1 with the call triplet; L=1 with the log pair;
+otherwise each is 0.
 Historical block: decimal or 0x-hex, 0–2^256-1, at most 78 characters, no leading
 zeros/signs/whitespace/tags; at most once, validated even with help/version.
 The probe calls eth_getBlockByNumber with [canonicalHex,false] after all rounds,
@@ -83,7 +89,23 @@ Gas cap 100000 may be insufficient; omitted sender may change behavior. A succes
 proves neither contract presence, ABI correctness, safety, canonicality/finality,
 archive support nor state agreement. Baseline/strict unchanged; time adds to Elapsed.
 CSV appends 16 call columns after any historical columns: 42/55/58/71 total for
-neither/historical/call/both. Call failures still produce complete reports.
+neither/historical/call/both without logs. Call failures still produce complete reports.
+Log bounds use the same exact uint256 grammar, from <= to, at most 100 blocks.
+Each log flag is allowed once; filters require the pair. All validation precedes
+config/env/output/RPC, including help/version. No tags or automatic ranges.
+One eth_getLogs with [{fromBlock,toBlock,address?,topics:[topic0]?}] runs after
+all measured and enabled historical/call phases, using the same concurrency,
+whole-body timeout and 1 MiB cap. No retries, pagination, splitting or fallback.
+Require at most 1000 mined logs, each with <=4096 data bytes and <=4 32-byte topics,
+valid fields, in-range block and matching filters. Any bad entry rejects all counts.
+Empty array is success 0; null is INVALID_RESULT. Only valid RPC -32601 means
+unsupported; other provider errors, 429 and timeouts remain errors. Rejected
+handshakes/chain guards skip the request. Only counts, safe errors and timings
+are reported; raw logs/data/topics are omitted. Filters are public report input.
+Completeness, canonicality/finality, provider honesty, archive support and fork
+agreement are unverified; providers may silently omit logs. Baseline/strict are
+unchanged; log time adds to Elapsed. CSV adds 16 log columns after enabled probes;
+totals with logs: 58/71/74/87 for no earlier probe/historical/call/both.
 Use environment input for API-key URLs to avoid storing them in shell history.
 Labels also name environment URLs; with --demo, supply three labels or none.
 Labels are public text: use names, never secrets or URLs. Use 1–64 characters.
@@ -148,6 +170,8 @@ export async function main(args, env, stdout, stderr) {
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
         'expected-chain': { type: 'string' },
         'historical-block': { type: 'string' },
+        'logs-from': { type: 'string' }, 'logs-to': { type: 'string' },
+        'logs-address': { type: 'string' }, 'logs-topic0': { type: 'string' },
         'call-to': { type: 'string' }, 'call-data': { type: 'string' }, 'call-block': { type: 'string' },
         strict: { type: 'boolean' }, 'max-failures': { type: 'string' },
         label: { type: 'string', multiple: true },
@@ -170,6 +194,13 @@ export async function main(args, env, stdout, stderr) {
       }
     }
     const callRequest = parseCallOptions({ callTo: values['call-to'], callData: values['call-data'], callBlock: values['call-block'] });
+    for (const name of ['logs-from', 'logs-to', 'logs-address', 'logs-topic0']) {
+      if (parsed.tokens.filter(t => t.kind === 'option' && t.name === name).length > 1) {
+        throw new LogsProbeError('Use each log range/filter option at most once.');
+      }
+    }
+    const logsRequest = parseLogsOptions({ logsFrom: values['logs-from'], logsTo: values['logs-to'],
+      logsAddress: values['logs-address'], logsTopic0: values['logs-topic0'] });
     if (values.help) { stdout.write(help); return 0; }
     if (values.version) {
       const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -213,6 +244,8 @@ export async function main(args, env, stdout, stderr) {
       expectedChain: values['expected-chain'] === undefined ? config.expectedChain : values['expected-chain'],
       labels: values.label,
       ...(callRequest === undefined ? {} : { callTo: callRequest.to, callData: callRequest.input, callBlock: callRequest.block.toString() }),
+      ...(logsRequest === undefined ? {} : { logsFrom: logsRequest.from.toString(), logsTo: logsRequest.to.toString(),
+        logsAddress: logsRequest.address, logsTopic0: logsRequest.topic0 }),
       ...(historicalBlock === undefined ? {} : { historicalBlock }),
     };
     if (endpoints.length === 0 && config.endpoints !== undefined) {
@@ -247,7 +280,7 @@ export async function main(args, env, stdout, stderr) {
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
     const expected = /^(Use |Provide |Samples |Warm-up |Interval |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
-    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || error instanceof CallProbeError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
+    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || error instanceof CallProbeError || error instanceof LogsProbeError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }
 }

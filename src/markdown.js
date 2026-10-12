@@ -1,3 +1,4 @@
+import { LOGS_NOTE } from './logs.js';
 import { CALL_NOTE } from './call.js';
 import { HISTORICAL_NOTE } from './historical.js';
 
@@ -126,6 +127,23 @@ export function formatMarkdown(report) {
         })),
       'success with zero return bytes means valid empty DATA; null, malformed or oversize DATA are errors. Only valid JSON-RPC -32601 is unsupported. Other RPC errors, including reverts, remain RPC_ERROR; provider text is never interpreted. skipped means handshake_failed or network_mismatch without a request. An em dash means unavailable, not zero or success. Raw calldata, return bytes and revert data are omitted.',
       CALL_NOTE);
+  }
+  if (settings.logs !== undefined) {
+    sections.push('## Bounded log probe',
+      table(['Setting', 'Value'], [
+        ['From block (decimal, inclusive)', settings.logs.fromBlock], ['To block (decimal, inclusive)', settings.logs.toBlock],
+        ['Address (public filter)', settings.logs.address ?? 'Any'], ['Topic0 (public filter)', settings.logs.topic0 ?? 'Any'],
+        ['Phase start (ms from run start)', report.logsPhase.startedMs],
+        ['Phase finish (ms from run start)', report.logsPhase.finishedMs], ['Phase elapsed (ms)', report.logsPhase.durationMs],
+      ]),
+      'One eth_getLogs per accepted endpoint after measured rounds and enabled historical/call phases. The same concurrency, whole-body timeout and 1 MiB cap apply. No retries, splitting, pagination or fallback. All logs must pass validation: at most 1000 mined logs, 4096 data bytes and four 32-byte topics per log, with blocks and filters matching the request. Attempt timings include failures and validation, excluding queue wait; phase elapsed includes scheduling and counts in whole-run elapsed, never measured latency.',
+      table(['Index', 'Outcome', 'Attempts', 'Log count', 'Removed count', 'Error', 'Skip reason', 'Start (ms)', 'Finish (ms)', 'Duration (ms)'],
+        results.map((r, i) => {
+          const l = r.logs;
+          return [i + 1, l.status, l.attempts, l.logCount, l.removedCount, l.error, l.skipReason, l.startedMs, l.finishedMs, l.durationMs];
+        })),
+      'Empty array means success with zero logs and zero removed entries. Null, malformed, oversized or filter-mismatched results are errors without partial counts. Only valid JSON-RPC -32601 is unsupported; other RPC errors remain RPC_ERROR. skipped means handshake_failed or network_mismatch without an attempt. An em dash means unavailable, not zero. Raw logs, data, topics, extra fields and provider messages are omitted.',
+      LOGS_NOTE);
   }
   sections.push('Endpoint URLs, credentials, headers, and raw provider messages are omitted. Labels are public text; do not put secrets in labels.');
   return sections.join('\n\n') + '\n';

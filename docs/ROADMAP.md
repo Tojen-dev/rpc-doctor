@@ -40,7 +40,7 @@ fix it first and record the reason; the exact commit count is a planning target.
 
 - [x] **20. Historical block probe.** Check retrieval of a user-selected historical block; distinguish null, unsupported, and error; avoid claiming full archive support.
 - [x] **21. Read-only call probe.** Support an explicit eth_call target/data/block with bounded response handling and no signing. Verified 2026-10-11.
-- [ ] **22. Bounded log probe.** Check eth_getLogs for an explicit small range and optional filter; validate ranges before requests.
+- [x] **22. Bounded log probe.** Check eth_getLogs for an explicit small range and optional filter; validate ranges before requests. Verified 2026-10-12.
 - [ ] **23. Finality-tag support.** Probe safe/finalized blocks and distinguish unsupported tags from transient failures.
 - [ ] **24. Node sync state.** Report eth_syncing results and validate boolean/object responses without treating missing support as healthy.
 - [ ] **25. Client identification.** Expose optional web3_clientVersion with size limits and terminal-safe output.

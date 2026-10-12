@@ -17,6 +17,7 @@
     "pacingWaitMs": { "$ref": "#/$defs/elapsedMs" },
     "historicalPhase": { "$ref": "#/$defs/historicalPhase" },
     "callPhase": { "$ref": "#/$defs/callPhase" },
+    "logsPhase": { "$ref": "#/$defs/logsPhase" },
     "latencyNotes": { "$ref": "#/$defs/notes" },
     "rounds": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/round" } },
     "healthPolicy": { "$ref": "#/$defs/healthPolicy" }
@@ -59,6 +60,7 @@
         "reference": { "$ref": "#/$defs/endpointIndex" },
         "expectedChain": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
         "call": { "$ref": "#/$defs/callSettings" },
+        "logs": { "$ref": "#/$defs/logsSettings" },
         "historicalBlock": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
         "warmup": { "type": "integer", "minimum": 1, "maximum": 20 },
         "intervalMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
@@ -86,6 +88,43 @@
         "successes": { "type": "integer", "minimum": 0, "maximum": 20 },
         "errors": { "$ref": "#/$defs/errors" },
         "durationMs": { "$ref": "#/$defs/elapsedMs" }
+      }
+    },
+    "logsSettings": {
+      "type": "object",
+      "required": ["fromBlock", "toBlock", "address", "topic0"],
+      "additionalProperties": true,
+      "properties": {
+        "fromBlock": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
+        "toBlock": { "type": "string", "$ref": "#/$defs/decimal", "maxLength": 78 },
+        "address": { "type": ["string", "null"], "pattern": "^0x[0-9a-f]{40}(?![\\s\\S])" },
+        "topic0": { "type": ["string", "null"], "pattern": "^0x[0-9a-f]{64}(?![\\s\\S])" }
+      }
+    },
+    "logsPhase": {
+      "type": "object",
+      "required": ["startedMs", "finishedMs", "durationMs"],
+      "additionalProperties": true,
+      "properties": {
+        "startedMs": { "$ref": "#/$defs/elapsedMs" },
+        "finishedMs": { "$ref": "#/$defs/elapsedMs" },
+        "durationMs": { "$ref": "#/$defs/elapsedMs" }
+      }
+    },
+    "logs": {
+      "type": "object",
+      "required": ["status", "attempts", "logCount", "removedCount", "error", "skipReason", "startedMs", "finishedMs", "durationMs"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "enum": ["success", "unsupported", "error", "skipped"] },
+        "attempts": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "logCount": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000 },
+        "removedCount": { "type": ["integer", "null"], "minimum": 0, "maximum": 1000 },
+        "error": { "anyOf": [{ "$ref": "#/$defs/errorCode" }, { "type": "null" }] },
+        "skipReason": { "enum": [null, "handshake_failed", "network_mismatch"] },
+        "startedMs": { "type": ["integer", "null"], "minimum": 0 },
+        "finishedMs": { "type": ["integer", "null"], "minimum": 0 },
+        "durationMs": { "type": ["integer", "null"], "minimum": 0 }
       }
     },
     "callSettings": {
@@ -195,6 +234,7 @@
         "warmup": { "$ref": "#/$defs/warmup" },
         "historicalBlock": { "$ref": "#/$defs/historicalBlock" },
         "call": { "$ref": "#/$defs/call" },
+        "logs": { "$ref": "#/$defs/logs" },
         "observations": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/observation" } }
       }
     },

@@ -42,7 +42,8 @@ Replace the example URLs with your provider endpoints. Local nodes are supported
 Baseline measurements send only `eth_chainId` and `eth_blockNumber`.
 The opt-in `--historical-block` probe also sends `eth_getBlockByNumber` once per
 accepted endpoint after all measured rounds. The opt-in call triplet sends one
-`eth_call` after sampling and the optional historical phase.
+`eth_call` after sampling and the optional historical phase. The opt-in log pair
+sends one `eth_getLogs` after all preceding phases.
 No transaction submission or signing is performed.
 
 For endpoint URLs containing credentials, populate `RPC_DOCTOR_ENDPOINTS_JSON` via
@@ -198,7 +199,7 @@ Five samples make a quick check, not a statistically robust p95 or p99 benchmark
 
 Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including
 chain handshakes, optional warm-up, block samples and the optional historical
-and call probes. Each endpoint's requests remain sequential.
+and call probes, followed by the optional log probe. Each endpoint's requests remain sequential.
 A preparation worker finishes one endpoint's handshake and warm-up before moving
 to the next endpoint. Measured workers instead perform one attempt per endpoint
 per round, with a barrier after preparation and after every round.
@@ -599,6 +600,10 @@ The existing report and error categories remain available in both formats.
 | `--call-to <address>` | None | CLI-only: 20-byte hex target; requires the full call triplet, once each |
 | `--call-data <hex>` | None | CLI-only: `0x` + even hex digits, 0–4096 bytes; sent as RPC `input` |
 | `--call-block <n>` | None | CLI-only: explicit decimal/`0x` block 0–2^256−1; no tags or default |
+| `--logs-from <n>` | None | CLI-only: explicit uint256 first block; requires `--logs-to`, each once |
+| `--logs-to <n>` | None | CLI-only: explicit uint256 last block; ordered inclusive range of 1–100 blocks |
+| `--logs-address <address>` | None | CLI-only: one optional 20-byte hex address; requires the log pair |
+| `--logs-topic0 <hash>` | None | CLI-only: one optional 32-byte hex topic0; requires the log pair |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
 | `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
@@ -613,14 +618,14 @@ The existing report and error categories remain available in both formats.
 
 Supply 1–20 distinct HTTP(S) URLs. URL userinfo, fragments, and redirects are refused.
 Response bodies are limited to 1 MiB. Each endpoint receives at most
-**`1 + warmup + samples + H + K` requests**, where `H=1` only with
-`--historical-block`, and `K=1` only with the complete call triplet; otherwise each
-is zero (handshake, warm-up, measured samples, optional probes).
+**`1 + warmup + samples + H + K + L` requests**, where `H=1` only with
+`--historical-block`, `K=1` only with the complete call triplet, and `L=1` only
+with the complete log pair; otherwise each is zero (handshake, warm-up, measured samples, optional probes).
 Failed or mismatched handshakes stop after one request; later failures do not
 reduce the configured attempt count. Warm-up adds up to `warmup × timeout` ms of
 request waiting per accepted endpoint, plus processing overhead. With concurrency
 `C` and `E` selected endpoints, a conservative request-time allowance remains
-`ceil(E / C) × (1 + warmup + samples + H + K) × timeout` ms. Each optional probe adds at
+`ceil(E / C) × (1 + warmup + samples + H + K + L) × timeout` ms. Each optional probe adds at
 most one timeout per accepted endpoint, scheduled in its own bounded phase.
 When planning a paced run,
 allow up to `(samples - 1) × interval` ms of additional deliberate waiting, plus
@@ -729,7 +734,7 @@ The CLI performs the request/response semantic checks.
 Table and Markdown append a separate historical section with request, phase
 timing, each outcome, projection, errors/skip reasons and limitations. CSV retains
 its original 42 columns in the same order, then appends these **13 columns only
-when enabled** (55 total without the call probe). Existing CSV quoting/formula
+when enabled** (55 total without call/log probes). Existing CSV quoting/formula
 protection still applies;
 null fields are empty, while real zero is `0`.
 
@@ -880,7 +885,7 @@ original 42 columns, then the 13 historical columns **if enabled**, then these
 | 57 (70) | `call_phase_finished_ms` |
 | 58 (71) | `call_phase_duration_ms` |
 
-Totals are **42 / 55 / 58 / 71** for neither / historical / call / both probes.
+Without the log probe, totals are **42 / 55 / 58 / 71** for neither / historical / call / both probes.
 Use header names. Nulls are empty, actual zeros remain `0`, and existing quoting
 and formula-prefix protection apply. Without the call flags, existing output
 bytes, fields and requests remain unchanged, including historical-only reports.
@@ -894,6 +899,171 @@ this is not a process-memory cap. Valid return DATA has at most 8194 characters
 and is reduced to a count. Reports add only bounded metadata per endpoint.
 The request-time allowance above includes each optional phase, plus overhead and
 pacing; it is not an enforced whole-run deadline.
+
+## Optional bounded log probe
+
+Use the CLI-only **pair** `--logs-from NUMBER --logs-to NUMBER`, each once.
+Both are required, ordered `from <= to`, with **1–100 blocks inclusive**. Numbers
+use the exact expected-chain uint256 grammar: canonical decimal or lowercase
+`0x` prefix with canonical hex digits, 0 through 2^256−1, at most 78 characters.
+Uppercase hex digits are accepted. Signs, leading zeros, whitespace, fractions,
+exponents and block tags are rejected. BigInt preserves large integers; there is
+no default range, head lookup or automatic adjustment.
+
+Optional `--logs-address ADDRESS` and `--logs-topic0 TOPIC` each take one value,
+only with the complete pair. Address is exactly `0x` plus 40 hex digits, topic0
+exactly `0x` plus 64; both normalize to lowercase. No lists, OR arrays or other
+topic positions are accepted. Omitted filters match any address/topic at that
+position. These filters and bounds are **public report settings**: do not put
+secrets in CLI arguments, shell history or filters.
+
+```sh
+node bin/rpc-doctor.js --demo --logs-from 0 --logs-to 99 --json
+node bin/rpc-doctor.js --demo --logs-from 0xF --logs-to 15 \
+  --logs-address 0x0000000000000000000000000000000000000000 --markdown
+```
+
+Missing, incomplete, repeated, invalid or out-of-bound options fail with exit `2`
+before config/environment resolution, output filesystem access or RPC, including
+with help/version. Valid help/version skip those operations. All log options are
+CLI-only; config equivalents (`logs`, `logsFrom`, `logsTo`, `logsAddress`,
+`logsTopic0` and hyphenated names) are unknown fields, even with CLI overrides.
+
+The request is one `eth_getLogs` with one filter object:
+
+```js
+[{ fromBlock: canonicalHexFrom, toBlock: canonicalHexTo,
+   address: optionalAddress, topics: [optionalTopic0] }]
+```
+
+The `address` and `topics` properties are **omitted** when their corresponding
+flags are absent. There is no `blockHash` filter. This follows the
+[execution-apis eth_getLogs method](https://github.com/ethereum/execution-apis/blob/main/src/eth/filter.yaml),
+[filter schema](https://github.com/ethereum/execution-apis/blob/main/src/schemas/filter.yaml)
+and [log field definitions](https://github.com/ethereum/execution-apis/blob/main/src/schemas/receipt.yaml).
+No server-side filter is created. No transactions, signing, pagination, range
+splitting, retries, fallback or alternate methods are used.
+
+The log phase starts only after all measured rounds and enabled historical/call
+phases finish. Every handshake/expected-chain-accepted endpoint receives one
+request, even when all its measured samples failed. Failed handshakes and network
+mismatches get an explicit skip. The same concurrency pool, unique request IDs,
+whole-body timeout, redirect policy and **1 MiB body cap** apply. A worker remains
+occupied through body reading and validation. Timeout/abort cannot guarantee
+that the remote provider stops processing.
+
+### Complete validation and limits
+
+Success requires an array of **0–1000 logs**, with every element passing this
+probe's strict mined-log checks. No logs are truncated and no partial count is
+published if any element fails. The required fields are:
+
+| Field | Validation |
+| --- | --- |
+| `removed` | Boolean; true entries count in both total and removed counts |
+| `blockNumber` | Canonical hex uint256, within the exact requested inclusive range |
+| `logIndex`, `transactionIndex` | Canonical hex uint256; never converted through Number |
+| `transactionHash`, `blockHash` | Non-null `0x` plus 64 hex digits |
+| `address` | `0x` plus 40 hex digits; matches the optional address filter case-insensitively |
+| `data` | `0x` plus even hex digits, **0–4096 decoded bytes**; empty `0x` accepted |
+| `topics` | Array of **0–4** non-null 32-byte hex values; first topic must match when topic0 filter is supplied |
+
+Response quantities require lowercase `0x`, no leading zeros (except `0x0`) and
+at most 64 hex digits. Hash/address/data digits may have either case. Pending or
+missing values for required mined fields are rejected. `blockTimestamp` is
+optional; when present it must also be a canonical hex uint256. Other extra
+fields are ignored and discarded. This is a deliberately strict local probe
+contract, not a claim that every optional field in the upstream schema is
+universally required. It does not authenticate logs, sort them, deduplicate them,
+verify hashes or compare results between endpoints; counts include all returned
+entries, including duplicates and removed entries.
+
+| Status | Meaning |
+| --- | --- |
+| `success` | Entire response validated; empty array gives `logCount: 0`, `removedCount: 0` |
+| `unsupported` | Only a valid matching-ID RPC error `-32601`; safe error is `RPC_ERROR` |
+| `error` | Null/non-array, malformed/missing fields, range/filter mismatch or any local log/data/topic bound violation gives `INVALID_RESULT`; malformed envelopes give `INVALID_RESPONSE`; body limit, HTTP, 429, network and timeout retain their existing categories |
+| `skipped` | No request; `handshake_failed` or `network_mismatch` |
+
+Provider limits, invalid params (`-32602`), pruned history (`4444`) and other valid
+RPC failures remain `error` / `RPC_ERROR`. Message text is never used to infer
+unsupported, empty success or a retry. A body over 1 MiB is `RESPONSE_TOO_LARGE`,
+independently of smaller per-field limits. All error/skipped counts are null.
+Raw logs, data, topic arrays, unknown fields, errors/messages, endpoint URLs and
+headers are never retained in reports. Only validated counts and public requested
+settings are saved.
+
+**Success does not prove completeness or provider honesty.** A provider can
+silently omit logs, even with fewer than 1000 returned. Numeric ranges do not pin
+block hashes; forks/reorganizations may differ. Canonicality, finality, archive
+support and equal state/forks across endpoints remain unverified. Removed counts
+only reflect the provider's boolean flags. Empty success does not prove that no
+matching event occurred.
+
+### Log report fields and CSV order
+
+Only enabled runs add optional JSON v1 fields. `settings.logs` requires decimal
+`fromBlock`, `toBlock`, and nullable lowercase `address`, `topic0` (null means no
+filter). `logsPhase` requires nonnegative rounded `startedMs`, `finishedMs`,
+`durationMs`. `results[].logs` requires `status`, `attempts` (0 skipped, otherwise
+1), nullable integer `logCount` and `removedCount` (0–1000), safe `error`,
+`skipReason`, and nullable `startedMs`, `finishedMs`, `durationMs`. Success counts
+are known, including actual zero; error/skipped counts are unavailable. Attempt
+timings include failures and validation but exclude worker queue wait. Skipped
+attempt timings are null. Phase time includes scheduling; all-skipped phases
+still have boundaries and may take zero milliseconds. All offsets use run start;
+overlapping durations must not be summed.
+
+The optional result does not change baseline health/strict, attempts/errors,
+latency, rounds, pacing, warm-up, block or lag. Whole-run elapsed and generation
+time include the phase. All four formats and atomic output contain complete
+probe outcomes on health exits `0`/`1`; file errors retain exit `2` and the
+existing publication guarantees. Without log flags, all previous request traces,
+fields and report bytes remain unchanged, including historical/call combinations.
+
+Schema v1 checks known fields, nullable types, local bounds and required members;
+additional properties remain permitted. It does not enforce exact uint256 range
+beyond format/78 decimal digits, ordered 100-block ranges, feature co-occurrence,
+removed count <= total, or outcome/timing consistency. Those semantic checks
+remain separate from structural schema validation. Old fixtures remain valid.
+
+Table and Markdown append separate log sections; dynamic Markdown remains escaped.
+CSV appends **16 columns after all enabled historical/call columns**, in this
+order (indices below are relative to the log section, beginning after
+`42 + 13*H + 16*K` existing columns):
+
+| Offset | Column |
+| --- | --- |
+| 1 | `logs_from_block` |
+| 2 | `logs_to_block` |
+| 3 | `logs_address` |
+| 4 | `logs_topic0` |
+| 5 | `logs_status` |
+| 6 | `logs_attempts` |
+| 7 | `logs_count` |
+| 8 | `logs_removed_count` |
+| 9 | `logs_error` |
+| 10 | `logs_skip_reason` |
+| 11 | `logs_started_ms` |
+| 12 | `logs_finished_ms` |
+| 13 | `logs_duration_ms` |
+| 14 | `logs_phase_started_ms` |
+| 15 | `logs_phase_finished_ms` |
+| 16 | `logs_phase_duration_ms` |
+
+Total columns are `42 + 13*H + 16*K + 16*L`: without logs, **42/55/58/71**;
+with logs, **58/71/74/87** for no earlier probe / historical / call / both.
+Use header names. Null fields are empty, actual zero is `0`; CRLF records,
+quoting and formula-prefix protection remain unchanged. Public settings and phase
+times repeat per endpoint. The synthetic demo returns one valid log, empty success
+and unsupported, without affecting baseline rate limits or earlier probes.
+
+All limits apply together: 1000 logs with 4096 data bytes each would exceed the
+1 MiB aggregate body cap and fail. The body reader and JSON parser use temporary
+buffer/string/object copies; the cap is not a process-memory limit. The completed
+report retains only bounded metadata per endpoint. The request-time allowance
+above adds one timeout per accepted endpoint for this phase, plus scheduling and
+validation overhead. There is no enforced whole-run deadline.
 
 ## Atomic report files
 
@@ -1010,8 +1180,8 @@ exit code in CI rather than inferring success from a readable CSV file.
 
 The byte format is UTF-8 without a BOM, comma-separated, with one header and **42
 fields in every record by default**, 55 with historical only, 58 with call only,
-or 71 with both probes, as documented
-above. Every field is double-quoted; embedded quotes are doubled,
+or 71 with both probes; enabling logs appends 16 columns to any combination, as
+documented above. Every field is double-quoted; embedded quotes are doubled,
 and embedded CR/LF remain inside the quoted field. Records end with CRLF, including
 the final record, with no extra blank record. The CSV follows the quoting and record
 conventions in [RFC 4180](https://www.rfc-editor.org/rfc/rfc4180). No banner, commentary,
@@ -1064,7 +1234,7 @@ precision instead of the table's one-decimal display.
 | 34 | `pacing_wait_ms` | Actual total explicit pacing wait; empty at zero/off interval |
 | 35 | `started_at` | UTC ISO run-start timestamp |
 | 36 | `generated_at` | UTC ISO report-generation timestamp |
-| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and optional historical/call phases |
+| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and optional historical/call/log phases |
 | 38 | `demo` | true for the local synthetic demo; empty otherwise |
 | 39 | `strict_passed` | **Whole-run** strict result, true/false; empty if disabled |
 | 40 | `strict_max_failures` | Allowed measured failures per endpoint; empty if strict disabled |
@@ -1276,7 +1446,8 @@ Later additions are optional for compatibility: `startedAt`, `rounds`,
 `healthPolicy`. The optional historical probe adds `settings.historicalBlock`,
 `historicalPhase` and each result's `historicalBlock`; old reports need none of
 these fields. The call probe likewise adds optional `settings.call`, `callPhase`
-and `results[].call`, with required members when present.
+and `results[].call`, with required members when present. The log probe adds
+optional `settings.logs`, `logsPhase` and `results[].logs` under the same rule.
 Reference/network/warm-up/pacing fields and `demo` are optional because they depend on selected options. **Every known field is checked when
 present**; an optional object still needs its required members. Current output
 omits warm-up/pacing settings at zero; if present, `warmup` and `intervalMs` must

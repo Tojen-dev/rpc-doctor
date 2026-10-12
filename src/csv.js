@@ -95,6 +95,24 @@ export function formatCsv(report) {
     ['call_phase_finished_ms', (r, report) => report.callPhase.finishedMs],
     ['call_phase_duration_ms', (r, report) => report.callPhase.durationMs],
   );
+  if (report.settings.logs !== undefined) selected.push(
+    ['logs_from_block', (r, report) => report.settings.logs.fromBlock],
+    ['logs_to_block', (r, report) => report.settings.logs.toBlock],
+    ['logs_address', (r, report) => report.settings.logs.address],
+    ['logs_topic0', (r, report) => report.settings.logs.topic0],
+    ['logs_status', r => r.logs.status],
+    ['logs_attempts', r => r.logs.attempts],
+    ['logs_count', r => r.logs.logCount],
+    ['logs_removed_count', r => r.logs.removedCount],
+    ['logs_error', r => r.logs.error],
+    ['logs_skip_reason', r => r.logs.skipReason],
+    ['logs_started_ms', r => r.logs.startedMs],
+    ['logs_finished_ms', r => r.logs.finishedMs],
+    ['logs_duration_ms', r => r.logs.durationMs],
+    ['logs_phase_started_ms', (r, report) => report.logsPhase.startedMs],
+    ['logs_phase_finished_ms', (r, report) => report.logsPhase.finishedMs],
+    ['logs_phase_duration_ms', (r, report) => report.logsPhase.durationMs],
+  );
   const rows = [selected.map(([name]) => name),
     ...report.results.map((result, index) => selected.map(([, get]) => get(result, report, index)))];
   return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
