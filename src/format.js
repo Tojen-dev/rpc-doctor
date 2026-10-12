@@ -1,3 +1,4 @@
+import { FINALITY_NOTE, FINALITY_OUTCOMES } from './finality.js';
 import { LOGS_NOTE } from './logs.js';
 import { CALL_NOTE } from './call.js';
 import { HISTORICAL_NOTE } from './historical.js';
@@ -92,6 +93,16 @@ export function formatTable(report) {
       }),
       'Empty array is success with 0 logs. Invalid/oversize results are errors without partial counts; only valid JSON-RPC -32601 is unsupported. Skipped means no request; — means unavailable. Raw logs are omitted.',
       LOGS_NOTE,
+    ] : []),
+    ...(report.settings.finality === true ? ['',
+      'Finality tags: safe then finalized (optional, after measured rounds and other probes)',
+      `Finality phase: ${report.finalityPhase.startedMs}–${report.finalityPhase.finishedMs}ms from start; elapsed ${report.finalityPhase.durationMs}ms (included in Elapsed).`,
+      ...report.results.flatMap((r, index) => ['safe', 'finalized'].map(tag => {
+        const f = r.finality[tag];
+        return `  Endpoint ${index + 1} (${r.endpoint}), ${tag}: ${f.status}; attempts ${f.attempts}; number ${f.number ?? '—'}; hash ${f.hash ?? '—'}; error ${f.error ?? '—'}; RPC kind ${f.rpcErrorKind ?? '—'}; skip reason ${f.skipReason ?? '—'}; observed ${f.startedMs ?? '—'}–${f.finishedMs ?? '—'}ms; duration ${f.durationMs ?? '—'}ms`;
+      })),
+      FINALITY_OUTCOMES,
+      FINALITY_NOTE,
     ] : []),
   ].join('\n');
 }

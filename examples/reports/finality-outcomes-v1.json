@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-12T00:00:00.000Z",
+  "generatedAt": "2026-10-12T00:00:00.004Z",
+  "durationMs": 4,
+  "settings": {
+    "samples": 1,
+    "timeoutMs": 1000,
+    "concurrency": 4,
+    "lagThreshold": 3,
+    "finality": true
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "startedMs": 1,
+      "finishedMs": 2
+    }
+  ],
+  "finalityPhase": {
+    "startedMs": 2,
+    "finishedMs": 4,
+    "durationMs": 2
+  },
+  "results": [
+    {
+      "endpoint": "Synthetic finality 1",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 3,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "finality": {
+        "safe": {
+          "status": "found",
+          "attempts": 1,
+          "number": "0",
+          "hash": "0xabababababababababababababababababababababababababababababababab",
+          "error": null,
+          "rpcErrorKind": null,
+          "skipReason": null,
+          "startedMs": 2,
+          "finishedMs": 3,
+          "durationMs": 1
+        },
+        "finalized": {
+          "status": "found",
+          "attempts": 1,
+          "number": "9007199254740993",
+          "hash": "0xabababababababababababababababababababababababababababababababab",
+          "error": null,
+          "rpcErrorKind": null,
+          "skipReason": null,
+          "startedMs": 3,
+          "finishedMs": 4,
+          "durationMs": 1
+        }
+      }
+    },
+    {
+      "endpoint": "Synthetic finality 2",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 3,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "finality": {
+        "safe": {
+          "status": "null",
+          "attempts": 1,
+          "number": null,
+          "hash": null,
+          "error": null,
+          "rpcErrorKind": null,
+          "skipReason": null,
+          "startedMs": 2,
+          "finishedMs": 3,
+          "durationMs": 1
+        },
+        "finalized": {
+          "status": "error",
+          "attempts": 1,
+          "number": null,
+          "hash": null,
+          "error": "RPC_ERROR",
+          "rpcErrorKind": "invalid_params",
+          "skipReason": null,
+          "startedMs": 3,
+          "finishedMs": 4,
+          "durationMs": 1
+        }
+      }
+    },
+    {
+      "endpoint": "Synthetic finality 3",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 3,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "finality": {
+        "safe": {
+          "status": "unsupported",
+          "attempts": 1,
+          "number": null,
+          "hash": null,
+          "error": "RPC_ERROR",
+          "rpcErrorKind": "method_unavailable",
+          "skipReason": null,
+          "startedMs": 2,
+          "finishedMs": 3,
+          "durationMs": 1
+        },
+        "finalized": {
+          "status": "error",
+          "attempts": 1,
+          "number": null,
+          "hash": null,
+          "error": "RPC_ERROR",
+          "rpcErrorKind": "other",
+          "skipReason": null,
+          "startedMs": 3,
+          "finishedMs": 4,
+          "durationMs": 1
+        }
+      }
+    },
+    {
+      "endpoint": "Synthetic finality 4",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 3,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "finality": {
+        "safe": {
+          "status": "error",
+          "attempts": 1,
+          "number": null,
+          "hash": null,
+          "error": "HTTP_ERROR",
+          "rpcErrorKind": null,
+          "skipReason": null,
+          "startedMs": 2,
+          "finishedMs": 3,
+          "durationMs": 1
+        },
+        "finalized": {
+          "status": "error",
+          "attempts": 1,
+          "number": null,
+          "hash": null,
+          "error": "INVALID_RESULT",
+          "rpcErrorKind": null,
+          "skipReason": null,
+          "startedMs": 3,
+          "finishedMs": 4,
+          "durationMs": 1
+        }
+      }
+    }
+  ]
+}

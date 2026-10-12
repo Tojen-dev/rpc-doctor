@@ -28,14 +28,20 @@ export function parseQuantity(value) {
   return BigInt(value);
 }
 
-async function readBody(response) {
+async function readBody(response, signal) {
   if (!response.body) throw new RpcError('INVALID_RESPONSE', 'Empty response body.');
   const reader = response.body.getReader();
   const chunks = [];
   let size = 0;
+  // Keep cancellation attached to the reader itself: some Node fetch versions
+  // lose their internal abort linkage after GC once only a body reader remains.
+  const abort = () => { reader.cancel().catch(() => {}); };
+  signal.addEventListener('abort', abort, { once: true });
   try {
+    signal.throwIfAborted();
     while (true) {
       const { value, done } = await reader.read();
+      signal.throwIfAborted();
       if (done) break;
       size += value.byteLength;
       if (size > MAX_RESPONSE_BYTES) {
@@ -45,6 +51,7 @@ async function readBody(response) {
       chunks.push(Buffer.from(value));
     }
   } finally {
+    signal.removeEventListener('abort', abort);
     reader.releaseLock();
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -74,7 +81,7 @@ export async function rpcCall(endpoint, method, params = [], { timeoutMs = 5000,
       await response.body?.cancel();
       throw new RpcError(response.status === 429 ? 'RATE_LIMITED' : 'HTTP_ERROR', `HTTP ${response.status}.`);
     }
-    const data = await readBody(response);
+    const data = await readBody(response, controller.signal);
     if (!data || Array.isArray(data) || data.jsonrpc !== '2.0' || data.id !== id ||
         Object.hasOwn(data, 'result') === Object.hasOwn(data, 'error')) {
       throw new RpcError('INVALID_RESPONSE', 'Invalid JSON-RPC response envelope.');

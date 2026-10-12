@@ -113,6 +113,25 @@ export function formatCsv(report) {
     ['logs_phase_finished_ms', (r, report) => report.logsPhase.finishedMs],
     ['logs_phase_duration_ms', (r, report) => report.logsPhase.durationMs],
   );
+  if (report.settings.finality === true) {
+    for (const tag of ['safe', 'finalized']) selected.push(
+      [`finality_${tag}_status`, r => r.finality[tag].status],
+      [`finality_${tag}_attempts`, r => r.finality[tag].attempts],
+      [`finality_${tag}_number`, r => r.finality[tag].number],
+      [`finality_${tag}_hash`, r => r.finality[tag].hash],
+      [`finality_${tag}_error`, r => r.finality[tag].error],
+      [`finality_${tag}_rpc_error_kind`, r => r.finality[tag].rpcErrorKind],
+      [`finality_${tag}_skip_reason`, r => r.finality[tag].skipReason],
+      [`finality_${tag}_started_ms`, r => r.finality[tag].startedMs],
+      [`finality_${tag}_finished_ms`, r => r.finality[tag].finishedMs],
+      [`finality_${tag}_duration_ms`, r => r.finality[tag].durationMs],
+    );
+    selected.push(
+      ['finality_phase_started_ms', (r, report) => report.finalityPhase.startedMs],
+      ['finality_phase_finished_ms', (r, report) => report.finalityPhase.finishedMs],
+      ['finality_phase_duration_ms', (r, report) => report.finalityPhase.durationMs],
+    );
+  }
   const rows = [selected.map(([name]) => name),
     ...report.results.map((result, index) => selected.map(([, get]) => get(result, report, index)))];
   return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';

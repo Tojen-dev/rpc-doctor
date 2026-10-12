@@ -40,6 +40,14 @@ export async function runDemo(options) {
           return;
         }
         if (request.method === 'eth_getBlockByNumber') {
+          if (['safe', 'finalized'].includes(request.params[0])) {
+            const safe = request.params[0] === 'safe';
+            const outcome = delay === 5 ? { result: { number: safe ? '0xfe' : '0xf0', hash: `0x${'cd'.repeat(32)}` } }
+              : delay === 35 ? safe ? { result: null } : { error: { code: -32602, message: 'Synthetic invalid params.' } }
+                : { error: { code: safe ? -32601 : -32000, message: 'Synthetic provider error.' } };
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...outcome }));
+            return;
+          }
           const historical = delay === 5 ? { result: { number: request.params[0], hash: `0x${'ab'.repeat(32)}` } }
             : delay === 35 ? { result: null } : { error: { code: -32601, message: 'Synthetic method unavailable.' } };
           res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...historical }));

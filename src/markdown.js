@@ -1,3 +1,4 @@
+import { FINALITY_NOTE, FINALITY_OUTCOMES } from './finality.js';
 import { LOGS_NOTE } from './logs.js';
 import { CALL_NOTE } from './call.js';
 import { HISTORICAL_NOTE } from './historical.js';
@@ -144,6 +145,23 @@ export function formatMarkdown(report) {
         })),
       'Empty array means success with zero logs and zero removed entries. Null, malformed, oversized or filter-mismatched results are errors without partial counts. Only valid JSON-RPC -32601 is unsupported; other RPC errors remain RPC_ERROR. skipped means handshake_failed or network_mismatch without an attempt. An em dash means unavailable, not zero. Raw logs, data, topics, extra fields and provider messages are omitted.',
       LOGS_NOTE);
+  }
+  if (settings.finality === true) {
+    sections.push('## Finality tag probes',
+      table(['Setting', 'Value'], [
+        ['Tags (sequential per endpoint)', 'safe, finalized'],
+        ['Phase start (ms from run start)', report.finalityPhase.startedMs],
+        ['Phase finish (ms from run start)', report.finalityPhase.finishedMs], ['Phase elapsed (ms)', report.finalityPhase.durationMs],
+      ]),
+      'Two eth_getBlockByNumber requests per accepted endpoint after measured rounds and all enabled historical/call/log phases, with full transactions disabled. Finalized is attempted even if safe fails. Same concurrency, whole-body timeout and 1 MiB cap; no retries, fallback or extra requests. Attempt timings include failures and validation, excluding queue wait; phase elapsed includes scheduling and counts in whole-run elapsed, never measured latency.',
+      table(['Index', 'Tag', 'Outcome', 'Attempts', 'Number', 'Hash', 'Error', 'RPC error kind', 'Skip reason', 'Start (ms)', 'Finish (ms)', 'Duration (ms)'],
+        results.flatMap((r, i) => ['safe', 'finalized'].map(tag => {
+          const f = r.finality[tag];
+          return [i + 1, tag, f.status, f.attempts, f.number, f.hash, f.error, f.rpcErrorKind, f.skipReason, f.startedMs, f.finishedMs, f.durationMs];
+        }))),
+      FINALITY_OUTCOMES,
+      'skipped means handshake_failed or network_mismatch, with zero attempts and unavailable timings. An em dash means unavailable, not zero or success. Only the validated exact number and lowercase 32-byte hash are retained; no whole blocks or transactions.',
+      FINALITY_NOTE);
   }
   sections.push('Endpoint URLs, credentials, headers, and raw provider messages are omitted. Labels are public text; do not put secrets in labels.');
   return sections.join('\n\n') + '\n';

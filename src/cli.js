@@ -1,3 +1,4 @@
+import { FinalityProbeError } from './finality.js';
 import { LogsProbeError, parseLogsOptions } from './logs.js';
 import { CallProbeError, parseCallOptions } from './call.js';
 import { parseArgs } from 'node:util';
@@ -38,6 +39,7 @@ Options:
   --logs-to <n>      Explicit last block; inclusive range of 1–100 blocks (CLI-only)
   --logs-address <a> Optional single 20-byte hex filter; requires log range
   --logs-topic0 <h>  Optional single 32-byte hex topic0; requires log range
+  --finality         Probe safe then finalized headers after other probes (CLI-only)
   --strict           Exit 1 when any endpoint fails the CI health policy (CLI-only)
   --max-failures <n>  Allowed failed measured calls per endpoint, 0–100 (default: 0;
                      requires --strict; CLI-only)
@@ -52,7 +54,7 @@ Options:
   --version, -v      Show version
 
 At most 20 endpoints; requests per endpoint stay sequential. No transactions sent.
-Concurrency includes handshakes, warm-up, samples and optional historical/call/log probes;
+Concurrency includes handshakes, warm-up, samples and optional historical/call/log/finality probes;
 it also applies to --demo.
 All endpoints finish preparation before sampling begins. Each measured round sends
 one call per accepted endpoint and waits for all outcomes before the next round.
@@ -63,9 +65,19 @@ Slow endpoints delay all peers; observations are not synchronized.
 JSON records round boundaries and each attempt's start/finish in elapsed client ms
 from startedAt; the table shows each endpoint's first-start to last-finish window.
 Warm-up follows the network guard; failures and elapsed ms are reported separately.
-Maximum requests per endpoint: 1 + warmup + samples + H + K + L.
+Maximum requests per endpoint: 1 + warmup + samples + H + K + L + 2F.
 H=1 with --historical-block; K=1 with the call triplet; L=1 with the log pair;
-otherwise each is 0.
+F=1 with --finality; otherwise each is 0.
+--finality is valueless, at most once, validated even with help/version.
+After all enabled earlier phases, eth_getBlockByNumber sends ["safe",false] then
+["finalized",false] per accepted endpoint, even if safe fails. Same concurrency,
+whole-body timeout and 1 MiB limit; no retries, fallback, latest or head comparisons.
+Failed/mismatched handshakes skip both. Only exact uint256 number and 32-byte hash
+are retained. null means no block returned; -32601 means method unavailable;
+-32602 is ambiguous invalid params/tag rejection, other RPC errors remain unknown.
+Provider messages never determine tag support. Optional CSV appends 23 columns.
+Finality outcomes do not affect measured metrics, status or strict health policy.
+Sequential headers do not prove actual safety, finality, canonicality or freshness.
 Historical block: decimal or 0x-hex, 0–2^256-1, at most 78 characters, no leading
 zeros/signs/whitespace/tags; at most once, validated even with help/version.
 The probe calls eth_getBlockByNumber with [canonicalHex,false] after all rounds,
@@ -170,6 +182,7 @@ export async function main(args, env, stdout, stderr) {
         'lag-threshold': { type: 'string' }, reference: { type: 'string' },
         'expected-chain': { type: 'string' },
         'historical-block': { type: 'string' },
+        finality: { type: 'boolean' },
         'logs-from': { type: 'string' }, 'logs-to': { type: 'string' },
         'logs-address': { type: 'string' }, 'logs-topic0': { type: 'string' },
         'call-to': { type: 'string' }, 'call-data': { type: 'string' }, 'call-block': { type: 'string' },
@@ -184,6 +197,9 @@ export async function main(args, env, stdout, stderr) {
     if (values.csv && values.json) throw new Error('Use either --csv or --json, not both.');
     if (values.markdown && (values.csv || values.json)) throw new Error('Use --markdown without --json or --csv.');
     validateOutputOptions(values, parsed.tokens);
+    if (parsed.tokens.filter(t => t.kind === 'option' && t.name === 'finality').length > 1) {
+      throw new FinalityProbeError('Use --finality at most once, without a value.');
+    }
     if (parsed.tokens.filter(t => t.kind === 'option' && t.name === 'historical-block').length > 1) {
       throw new HistoricalBlockError('Use --historical-block at most once.');
     }
@@ -247,6 +263,7 @@ export async function main(args, env, stdout, stderr) {
       ...(logsRequest === undefined ? {} : { logsFrom: logsRequest.from.toString(), logsTo: logsRequest.to.toString(),
         logsAddress: logsRequest.address, logsTopic0: logsRequest.topic0 }),
       ...(historicalBlock === undefined ? {} : { historicalBlock }),
+      ...(values.finality ? { finality: true } : {}),
     };
     if (endpoints.length === 0 && config.endpoints !== undefined) {
       endpoints = config.endpoints;
@@ -280,7 +297,7 @@ export async function main(args, env, stdout, stderr) {
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
     const expected = /^(Use |Provide |Samples |Warm-up |Interval |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
-    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || error instanceof CallProbeError || error instanceof LogsProbeError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
+    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || error instanceof CallProbeError || error instanceof LogsProbeError || error instanceof FinalityProbeError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }
 }

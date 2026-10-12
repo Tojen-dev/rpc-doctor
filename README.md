@@ -43,7 +43,8 @@ Baseline measurements send only `eth_chainId` and `eth_blockNumber`.
 The opt-in `--historical-block` probe also sends `eth_getBlockByNumber` once per
 accepted endpoint after all measured rounds. The opt-in call triplet sends one
 `eth_call` after sampling and the optional historical phase. The opt-in log pair
-sends one `eth_getLogs` after all preceding phases.
+sends one `eth_getLogs` after all preceding phases. The opt-in `--finality` flag
+then sends two `eth_getBlockByNumber` requests, for `safe` and `finalized`.
 No transaction submission or signing is performed.
 
 For endpoint URLs containing credentials, populate `RPC_DOCTOR_ENDPOINTS_JSON` via
@@ -604,6 +605,7 @@ The existing report and error categories remain available in both formats.
 | `--logs-to <n>` | None | CLI-only: explicit uint256 last block; ordered inclusive range of 1–100 blocks |
 | `--logs-address <address>` | None | CLI-only: one optional 20-byte hex address; requires the log pair |
 | `--logs-topic0 <hash>` | None | CLI-only: one optional 32-byte hex topic0; requires the log pair |
+| `--finality` | Off | CLI-only: valueless, once; safe then finalized headers after all earlier phases |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
 | `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
@@ -618,15 +620,16 @@ The existing report and error categories remain available in both formats.
 
 Supply 1–20 distinct HTTP(S) URLs. URL userinfo, fragments, and redirects are refused.
 Response bodies are limited to 1 MiB. Each endpoint receives at most
-**`1 + warmup + samples + H + K + L` requests**, where `H=1` only with
-`--historical-block`, `K=1` only with the complete call triplet, and `L=1` only
-with the complete log pair; otherwise each is zero (handshake, warm-up, measured samples, optional probes).
+**`1 + warmup + samples + H + K + L + 2*F` requests**, where `H=1` only with
+`--historical-block`, `K=1` only with the complete call triplet, `L=1` only
+with the complete log pair, and `F=1` only with `--finality`; otherwise each is zero (handshake, warm-up, measured samples, optional probes).
 Failed or mismatched handshakes stop after one request; later failures do not
 reduce the configured attempt count. Warm-up adds up to `warmup × timeout` ms of
 request waiting per accepted endpoint, plus processing overhead. With concurrency
 `C` and `E` selected endpoints, a conservative request-time allowance remains
-`ceil(E / C) × (1 + warmup + samples + H + K + L) × timeout` ms. Each optional probe adds at
-most one timeout per accepted endpoint, scheduled in its own bounded phase.
+`ceil(E / C) × (1 + warmup + samples + H + K + L + 2*F) × timeout` ms. Historical, call and logs each add at
+most one timeout per accepted endpoint; finality adds two, sequentially. Each
+feature runs in its own bounded phase.
 When planning a paced run,
 allow up to `(samples - 1) × interval` ms of additional deliberate waiting, plus
 timer/scheduling/processing overhead. Long rounds consume some or all of that
@@ -885,7 +888,7 @@ original 42 columns, then the 13 historical columns **if enabled**, then these
 | 57 (70) | `call_phase_finished_ms` |
 | 58 (71) | `call_phase_duration_ms` |
 
-Without the log probe, totals are **42 / 55 / 58 / 71** for neither / historical / call / both probes.
+Without log or finality probes, totals are **42 / 55 / 58 / 71** for neither / historical / call / both probes.
 Use header names. Nulls are empty, actual zeros remain `0`, and existing quoting
 and formula-prefix protection apply. Without the call flags, existing output
 bytes, fields and requests remain unchanged, including historical-only reports.
@@ -1051,7 +1054,7 @@ order (indices below are relative to the log section, beginning after
 | 15 | `logs_phase_finished_ms` |
 | 16 | `logs_phase_duration_ms` |
 
-Total columns are `42 + 13*H + 16*K + 16*L`: without logs, **42/55/58/71**;
+Without finality, total columns are `42 + 13*H + 16*K + 16*L`: without logs, **42/55/58/71**;
 with logs, **58/71/74/87** for no earlier probe / historical / call / both.
 Use header names. Null fields are empty, actual zero is `0`; CRLF records,
 quoting and formula-prefix protection remain unchanged. Public settings and phase
@@ -1064,6 +1067,153 @@ buffer/string/object copies; the cap is not a process-memory limit. The complete
 report retains only bounded metadata per endpoint. The request-time allowance
 above adds one timeout per accepted endpoint for this phase, plus scheduling and
 validation overhead. There is no enforced whole-run deadline.
+
+## Optional finality tag probes
+
+Use the CLI-only, valueless **`--finality`** flag once to observe `safe` and
+`finalized` block headers separately. Repetition and assignments such as
+`--finality=false` or `--finality=safe` fail with exit `2` before config/environment
+resolution, output filesystem access or RPC, including with help/version. Valid
+help/version do not access those resources. There are no finality config fields;
+`finality`, `finalityTags`, `safe`, `finalized` and other unknown fields are rejected,
+even with a valid CLI flag. Without the flag, old requests, fields, report bytes
+and exit semantics remain unchanged, including every historical/call/log combination.
+
+```sh
+node bin/rpc-doctor.js --demo --finality --json
+node bin/rpc-doctor.js --demo --finality --markdown --output finality.md
+# Combine all four optional probes with public synthetic inputs:
+node bin/rpc-doctor.js --demo --historical-block 0 \
+  --call-to 0x0000000000000000000000000000000000000000 \
+  --call-data 0x --call-block 0 --logs-from 0 --logs-to 99 --finality --csv
+```
+
+After **all** measured rounds and enabled historical, call and log phases finish,
+every handshake/expected-chain-accepted endpoint receives exactly these requests,
+sequentially, including when all its measured samples failed:
+
+```js
+eth_getBlockByNumber ["safe", false]
+eth_getBlockByNumber ["finalized", false]
+```
+
+A failed `safe` request still leads to the one `finalized` request. Failed or
+wrong-chain handshakes produce two explicit skips. The existing worker pool and
+concurrency limit apply through complete body reads and validation; a worker owns
+both requests for an endpoint. Each request has a unique ID, the same whole-body
+timeout and **1 MiB body cap**. There are no retries, tag substitutions, fallback
+to `latest` or numeric blocks, head/chain/state lookups or other extra methods.
+No signing or transaction submission occurs. Timeout/abort does not guarantee
+that the provider stops processing.
+
+This follows the [execution-apis block method](https://github.com/ethereum/execution-apis/blob/main/src/eth/block.yaml)
+and [block tag definitions](https://github.com/ethereum/execution-apis/blob/main/src/schemas/block.yaml).
+An unresolved safe/finalized tag is treated as an unknown block by that spec.
+Only a non-array object with a canonical lowercase-`0x`-prefixed uint256 `number`
+and a non-null 32-byte `hash` is accepted as `found`. Hex digits may be uppercase;
+the number becomes exact decimal text (including zero and values above safe Number
+precision), and the hash becomes lowercase. Quantities have no leading zeroes
+except `0x0` and at most 64 hex digits. Null/missing numbers or hashes, odd/short
+hashes, malformed quantities and over-uint256 numbers give `INVALID_RESULT`.
+Whole blocks, transactions, extra fields, raw messages/errors, headers and URLs
+are discarded; only the validated number/hash projection is retained.
+
+| Per-tag status | `error` / `rpcErrorKind` | Meaning |
+| --- | --- | --- |
+| `found` | null / null | Structurally valid number/hash returned |
+| `null` | null / null | Explicit null result; no block returned, not proof of unsupported tag |
+| `unsupported` | `RPC_ERROR` / `method_unavailable` | Valid matching-ID JSON-RPC `-32601`: method does not exist or is unavailable; does not prove tag-specific rejection |
+| `error` | `RPC_ERROR` / `invalid_params` | Valid `-32602`: invalid parameters; tag rejection is possible but ambiguous, so support remains unknown |
+| `error` | `RPC_ERROR` / `other` | Any other valid RPC error, including provider-specific, internal or pruned-history errors; support remains unknown |
+| `error` | Safe transport/result category / null | `HTTP_ERROR`, `RATE_LIMITED` (HTTP 429), `NETWORK_ERROR`, `TIMEOUT`, `RESPONSE_TOO_LARGE`, `INVALID_RESPONSE`, `INVALID_RESULT` or unexpected `UNKNOWN_ERROR`; does not establish absence or tag support |
+| `skipped` | null / null | No request; `skipReason` is `handshake_failed` or `network_mismatch` |
+
+The classification uses [JSON-RPC standard error codes](https://www.jsonrpc.org/specification#error_object),
+never arbitrary provider message text. That standard has no unambiguous
+unsupported-**tag** code, so this probe cannot certify tag non-support from
+`-32602` or a message containing “unsupported”. Malformed envelopes, wrong IDs,
+missing error messages and non-integer error codes are `INVALID_RESPONSE`, even
+if other fields resemble an unsupported response. Raw numeric error codes are
+not retained; the three documented RPC error kinds are the public classification.
+
+**These observations do not prove actual safety or finality.** A provider can
+mislabel a block. A returned header alone does not establish canonicality,
+freshness, provider honesty or equal state/forks across endpoints. The sequential
+observations are not atomic; no relation between safe/finalized heights, hashes,
+the measured head or other endpoints is checked. `found` is a structural result.
+
+### Finality fields, timing and CSV order
+
+Enabled runs add optional JSON v1 fields: `settings.finality: true`,
+`finalityPhase` (`startedMs`, `finishedMs`, `durationMs`), and `results[].finality`
+with required `safe` and `finalized` objects. Each tag object requires `status`,
+`attempts` (0 skipped, otherwise 1), nullable `number`, `hash`, `error`,
+`rpcErrorKind`, `skipReason`, `startedMs`, `finishedMs` and `durationMs`.
+Numbers/hashes are non-null only for `found`; errors and skips never retain a
+partial header. Actual zero is a valid number or timing, distinct from null.
+
+All offsets are rounded nonnegative client milliseconds from the existing run
+start. Attempt timings include failures and validation, exclude queue wait and
+are all null for skipped requests. Phase timing includes scheduling; an all-skipped
+phase still has boundaries and may take zero milliseconds. Concurrent durations
+must not be summed. Whole-run elapsed and generation time include this phase;
+baseline counts, warm-up, rounds, pacing, latency, block/lag, status and strict
+policy remain unchanged. Finality failure may accompany health exit `0`; found
+headers cannot rescue failed measurements from exit `1`. All four formats and
+atomic output include the complete report on health `0`/`1`; file errors keep
+exit `2` and the existing prior-file preservation rules.
+
+The feature adds **two requests** and up to `2 × timeout` request-wait milliseconds
+per accepted endpoint, plus scheduling and validation. The conservative whole-run
+allowance above includes this cost. There is no enforced whole-run deadline.
+The 1 MiB per-response cap applies before JSON parsing; temporary copies mean it
+is not a process-memory cap. Retained finality metadata is bounded per endpoint.
+
+Schema v1 checks required members, nullable types, enum values and local bounds,
+while accepting future additional fields. Older fixtures remain valid. The schema
+does not prove exact uint256 range beyond decimal format/78 digits, feature
+co-occurrence, outcome/attempt/error consistency or timing arithmetic. Runtime
+semantic checks remain separate. New independent synthetic fixtures illustrate
+all outcomes, large numbers, zero, skips and zero-duration phase boundaries.
+
+Table and Markdown append a separate finality section after all earlier optional
+sections. Every dynamic Markdown field stays escaped. CSV appends **23 columns**
+after the existing `42 + 13*H + 16*K + 16*L` columns, in this exact order:
+
+| Offset | Column |
+| --- | --- |
+| 1 | `finality_safe_status` |
+| 2 | `finality_safe_attempts` |
+| 3 | `finality_safe_number` |
+| 4 | `finality_safe_hash` |
+| 5 | `finality_safe_error` |
+| 6 | `finality_safe_rpc_error_kind` |
+| 7 | `finality_safe_skip_reason` |
+| 8 | `finality_safe_started_ms` |
+| 9 | `finality_safe_finished_ms` |
+| 10 | `finality_safe_duration_ms` |
+| 11 | `finality_finalized_status` |
+| 12 | `finality_finalized_attempts` |
+| 13 | `finality_finalized_number` |
+| 14 | `finality_finalized_hash` |
+| 15 | `finality_finalized_error` |
+| 16 | `finality_finalized_rpc_error_kind` |
+| 17 | `finality_finalized_skip_reason` |
+| 18 | `finality_finalized_started_ms` |
+| 19 | `finality_finalized_finished_ms` |
+| 20 | `finality_finalized_duration_ms` |
+| 21 | `finality_phase_started_ms` |
+| 22 | `finality_phase_finished_ms` |
+| 23 | `finality_phase_duration_ms` |
+
+Total columns: `42 + 13*H + 16*K + 16*L + 23*F` (65 for finality alone, 110 for
+all four). Use header names. Nulls are empty cells, actual zeros remain `0`;
+quoting, CRLF and formula-prefix protection are unchanged. Import numbers/hashes
+as text to avoid spreadsheet precision loss or type inference.
+
+The demo returns safe/finalized pairs of found/found, null/invalid-params and
+method-unavailable/other-RPC-error. Both tags are attempted independently, while
+baseline rate limits and earlier probe outcomes remain unchanged.
 
 ## Atomic report files
 
@@ -1180,8 +1330,9 @@ exit code in CI rather than inferring success from a readable CSV file.
 
 The byte format is UTF-8 without a BOM, comma-separated, with one header and **42
 fields in every record by default**, 55 with historical only, 58 with call only,
-or 71 with both probes; enabling logs appends 16 columns to any combination, as
-documented above. Every field is double-quoted; embedded quotes are doubled,
+or 71 with both probes; enabling logs appends 16 columns and finality appends
+23 more columns to any combination, as documented above. Every field is
+double-quoted; embedded quotes are doubled,
 and embedded CR/LF remain inside the quoted field. Records end with CRLF, including
 the final record, with no extra blank record. The CSV follows the quoting and record
 conventions in [RFC 4180](https://www.rfc-editor.org/rfc/rfc4180). No banner, commentary,
@@ -1234,7 +1385,7 @@ precision instead of the table's one-decimal display.
 | 34 | `pacing_wait_ms` | Actual total explicit pacing wait; empty at zero/off interval |
 | 35 | `started_at` | UTC ISO run-start timestamp |
 | 36 | `generated_at` | UTC ISO report-generation timestamp |
-| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and optional historical/call/log phases |
+| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and optional historical/call/log/finality phases |
 | 38 | `demo` | true for the local synthetic demo; empty otherwise |
 | 39 | `strict_passed` | **Whole-run** strict result, true/false; empty if disabled |
 | 40 | `strict_max_failures` | Allowed measured failures per endpoint; empty if strict disabled |
@@ -1448,6 +1599,8 @@ Later additions are optional for compatibility: `startedAt`, `rounds`,
 these fields. The call probe likewise adds optional `settings.call`, `callPhase`
 and `results[].call`, with required members when present. The log probe adds
 optional `settings.logs`, `logsPhase` and `results[].logs` under the same rule.
+Finality adds optional `settings.finality: true`, `finalityPhase` and
+`results[].finality` with required `safe` and `finalized` outcome objects.
 Reference/network/warm-up/pacing fields and `demo` are optional because they depend on selected options. **Every known field is checked when
 present**; an optional object still needs its required members. Current output
 omits warm-up/pacing settings at zero; if present, `warmup` and `intervalMs` must
