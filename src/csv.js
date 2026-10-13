@@ -132,6 +132,23 @@ export function formatCsv(report) {
       ['finality_phase_duration_ms', (r, report) => report.finalityPhase.durationMs],
     );
   }
+  if (report.settings.syncing === true) selected.push(
+    ['syncing_status', r => r.syncing.status],
+    ['syncing_attempts', r => r.syncing.attempts],
+    ['syncing_is_syncing', r => r.syncing.isSyncing],
+    ['syncing_starting_block', r => r.syncing.startingBlock],
+    ['syncing_current_block', r => r.syncing.currentBlock],
+    ['syncing_highest_block', r => r.syncing.highestBlock],
+    ['syncing_height_order', r => r.syncing.heightOrder],
+    ['syncing_error', r => r.syncing.error],
+    ['syncing_skip_reason', r => r.syncing.skipReason],
+    ['syncing_started_ms', r => r.syncing.startedMs],
+    ['syncing_finished_ms', r => r.syncing.finishedMs],
+    ['syncing_duration_ms', r => r.syncing.durationMs],
+    ['syncing_phase_started_ms', (r, report) => report.syncingPhase.startedMs],
+    ['syncing_phase_finished_ms', (r, report) => report.syncingPhase.finishedMs],
+    ['syncing_phase_duration_ms', (r, report) => report.syncingPhase.durationMs],
+  );
   const rows = [selected.map(([name]) => name),
     ...report.results.map((result, index) => selected.map(([, get]) => get(result, report, index)))];
   return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';

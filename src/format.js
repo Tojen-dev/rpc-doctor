@@ -1,3 +1,4 @@
+import { SYNCING_NOTE, SYNCING_OUTCOMES } from './syncing.js';
 import { FINALITY_NOTE, FINALITY_OUTCOMES } from './finality.js';
 import { LOGS_NOTE } from './logs.js';
 import { CALL_NOTE } from './call.js';
@@ -103,6 +104,16 @@ export function formatTable(report) {
       })),
       FINALITY_OUTCOMES,
       FINALITY_NOTE,
+    ] : []),
+    ...(report.settings.syncing === true ? ['',
+      'Node sync state (optional, after measured rounds and all other probes)',
+      `Syncing phase: ${report.syncingPhase.startedMs}–${report.syncingPhase.finishedMs}ms from start; elapsed ${report.syncingPhase.durationMs}ms (included in Elapsed).`,
+      ...report.results.map((r, index) => {
+        const s = r.syncing;
+        return `  Endpoint ${index + 1} (${r.endpoint}): ${s.status}; attempts ${s.attempts}; is syncing ${s.isSyncing ?? '—'}; starting ${s.startingBlock ?? '—'}; current ${s.currentBlock ?? '—'}; highest ${s.highestBlock ?? '—'}; height order ${s.heightOrder ?? '—'}; error ${s.error ?? '—'}; skip reason ${s.skipReason ?? '—'}; observed ${s.startedMs ?? '—'}–${s.finishedMs ?? '—'}ms; duration ${s.durationMs ?? '—'}ms`;
+      }),
+      SYNCING_OUTCOMES,
+      SYNCING_NOTE,
     ] : []),
   ].join('\n');
 }

@@ -43,7 +43,7 @@ fix it first and record the reason; the exact commit count is a planning target.
 - [x] **22. Bounded log probe.** Check eth_getLogs for an explicit small range and optional filter; validate ranges before requests. Verified 2026-10-12.
 - [x] **23. Finality-tag support.** Probe safe/finalized blocks and distinguish method unavailable, ambiguous tag rejection and transient failures without guessing from messages. Verified 2026-10-12.
   Verification exposed a Node 22 fetch abort-linkage loss during garbage collection while reading a partial body. Explicit body-reader cancellation now enforces the existing timeout; a forced-GC regression checks that both tag requests finish as TIMEOUT.
-- [ ] **24. Node sync state.** Report eth_syncing results and validate boolean/object responses without treating missing support as healthy.
+- [x] **24. Node sync state.** Report eth_syncing results and validate boolean/object responses without treating missing support as healthy. Verified 2026-10-13.
 - [ ] **25. Client identification.** Expose optional web3_clientVersion with size limits and terminal-safe output.
 - [ ] **26. Batch capability.** Probe JSON-RPC batching and match responses by ID regardless of order, including partial failures.
 - [ ] **27. Capability summary.** Add a separate capability matrix; keep unsupported optional methods distinct from baseline health failures.

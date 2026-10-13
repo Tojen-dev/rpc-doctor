@@ -1,3 +1,4 @@
+import { SYNCING_NOTE, SYNCING_OUTCOMES } from './syncing.js';
 import { FINALITY_NOTE, FINALITY_OUTCOMES } from './finality.js';
 import { LOGS_NOTE } from './logs.js';
 import { CALL_NOTE } from './call.js';
@@ -162,6 +163,22 @@ export function formatMarkdown(report) {
       FINALITY_OUTCOMES,
       'skipped means handshake_failed or network_mismatch, with zero attempts and unavailable timings. An em dash means unavailable, not zero or success. Only the validated exact number and lowercase 32-byte hash are retained; no whole blocks or transactions.',
       FINALITY_NOTE);
+  }
+  if (settings.syncing === true) {
+    sections.push('## Node sync state',
+      table(['Setting', 'Value'], [
+        ['Phase start (ms from run start)', report.syncingPhase.startedMs],
+        ['Phase finish (ms from run start)', report.syncingPhase.finishedMs], ['Phase elapsed (ms)', report.syncingPhase.durationMs],
+      ]),
+      'One eth_syncing request with empty params per accepted endpoint after measured rounds and all enabled historical/call/log/finality phases, even when all measured samples failed. The same concurrency, whole-body timeout and 1 MiB cap apply; no retries or fallback. Attempt timings include failures and validation, excluding queue wait; phase elapsed includes scheduling. All offsets are client elapsed milliseconds. Probe time counts in whole-run elapsed, never measured latency.',
+      table(['Index', 'Outcome', 'Attempts', 'Is syncing', 'Starting block', 'Current block', 'Highest block', 'Height order', 'Error', 'Skip reason', 'Start (ms)', 'Finish (ms)', 'Duration (ms)'],
+        results.map((r, i) => {
+          const s = r.syncing;
+          return [i + 1, s.status, s.attempts, s.isSyncing, s.startingBlock, s.currentBlock, s.highestBlock, s.heightOrder, s.error, s.skipReason, s.startedMs, s.finishedMs, s.durationMs];
+        })),
+      SYNCING_OUTCOMES,
+      'true, null, strings, arrays and incomplete/malformed progress objects are INVALID_RESULT. All three heights must be canonical hex uint256 quantities and are retained as exact decimal strings. Client-specific fields are discarded. Skipped requests have handshake_failed or network_mismatch, zero attempts and unavailable timings. An em dash means unavailable, not false or zero.',
+      SYNCING_NOTE);
   }
   sections.push('Endpoint URLs, credentials, headers, and raw provider messages are omitted. Labels are public text; do not put secrets in labels.');
   return sections.join('\n\n') + '\n';

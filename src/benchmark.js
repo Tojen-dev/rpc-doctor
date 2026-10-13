@@ -1,3 +1,4 @@
+import { SyncingProbeError, probeSyncing } from './syncing.js';
 import { FinalityProbeError, probeFinality } from './finality.js';
 import { parseLogsOptions, probeLogs } from './logs.js';
 import { parseCallOptions, probeCall, CALL_GAS } from './call.js';
@@ -174,7 +175,7 @@ export function addPeerComparison(results, { lagThreshold = 3, reference } = {})
 
 export async function benchmark(endpoints, {
   samples = 5, timeoutMs = 5000, concurrency = 4, labels, lagThreshold = 3, reference, expectedChain, warmup = 0,
-  intervalMs = 0, historicalBlock, callTo, callData, callBlock, logsFrom, logsTo, logsAddress, logsTopic0, finality = false,
+  intervalMs = 0, historicalBlock, callTo, callData, callBlock, logsFrom, logsTo, logsAddress, logsTopic0, finality = false, syncing = false,
 } = {}) {
   if (!Array.isArray(endpoints) || endpoints.length < 1 || endpoints.length > 20) {
     throw new Error('Provide between 1 and 20 endpoints.');
@@ -205,6 +206,7 @@ export async function benchmark(endpoints, {
   const callRequest = parseCallOptions({ callTo, callData, callBlock });
   const logsRequest = parseLogsOptions({ logsFrom, logsTo, logsAddress, logsTopic0 });
   if (typeof finality !== 'boolean') throw new FinalityProbeError('Finality must be a boolean.');
+  if (typeof syncing !== 'boolean') throw new SyncingProbeError('Syncing must be a boolean.');
   const names = endpointLabels(labels, endpoints.length);
   const urls = endpoints.map(validateEndpoint);
   if (new Set(urls).size !== urls.length) throw new Error('Duplicate endpoints are not allowed.');
@@ -272,6 +274,14 @@ export async function benchmark(endpoints, {
     finalityPhase.finishedMs = elapsedMs();
     finalityPhase.durationMs = Math.round(performance.now() - phaseStarted);
   }
+  let syncingPhase;
+  if (syncing) {
+    const phaseStarted = performance.now();
+    syncingPhase = { startedMs: Math.round(phaseStarted - started), finishedMs: null, durationMs: null };
+    await runPhase(probes, workerCount, probe => probeSyncing(probe, elapsedMs));
+    syncingPhase.finishedMs = elapsedMs();
+    syncingPhase.durationMs = Math.round(performance.now() - phaseStarted);
+  }
   return {
     schemaVersion: 1,
     startedAt,
@@ -293,12 +303,14 @@ export async function benchmark(endpoints, {
       } }),
       ...(historical === undefined ? {} : { historicalBlock: historical.toString() }),
       ...(finality ? { finality: true } : {}),
+      ...(syncing ? { syncing: true } : {}),
     },
     ...(intervalMs === 0 ? {} : { pacingWaitMs: Math.round(pacingWaitMs) }),
     ...(historicalPhase === undefined ? {} : { historicalPhase }),
     ...(callPhase === undefined ? {} : { callPhase }),
     ...(logsPhase === undefined ? {} : { logsPhase }),
     ...(finalityPhase === undefined ? {} : { finalityPhase }),
+    ...(syncingPhase === undefined ? {} : { syncingPhase }),
     latencyNotes: [...LATENCY_NOTES],
     rounds,
     results: addPeerComparison(probes.map((probe) => probe.result), { lagThreshold, reference }),

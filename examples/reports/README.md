@@ -78,3 +78,17 @@ are stored. Tests assert the independently chosen values and schema rules.
 These synthetic fixtures are not captured or generated benchmark reports. Their
 fixed illustrative times and known outcomes support independent schema/format
 checks; no whole blocks, transactions or raw provider errors are stored.
+
+### Node sync state fixtures (2026-10-13)
+
+- `syncing-outcomes-v1.json`: independently authored sync-only report with six
+  healthy baselines: false, zero progress, exact large/max uint256 progress,
+  out-of-order progress, unsupported and invalid result. Unknown state remains
+  null; a progress object with equal counters does not turn into false.
+- `syncing-skipped-v1.json`: independently authored combined report with all five
+  optional probes skipped after failed handshake or rejected network; sync state,
+  counters and attempt timings are unavailable, and phase durations are zero.
+
+These fixtures contain fixed illustrative values, not captured or generated
+benchmark output. No client-specific extra fields or provider messages are stored.
+Tests independently assert their expected states, exact counters and schema rules.

@@ -45,6 +45,7 @@ accepted endpoint after all measured rounds. The opt-in call triplet sends one
 `eth_call` after sampling and the optional historical phase. The opt-in log pair
 sends one `eth_getLogs` after all preceding phases. The opt-in `--finality` flag
 then sends two `eth_getBlockByNumber` requests, for `safe` and `finalized`.
+Finally, opt-in `--syncing` sends one `eth_syncing` observation.
 No transaction submission or signing is performed.
 
 For endpoint URLs containing credentials, populate `RPC_DOCTOR_ENDPOINTS_JSON` via
@@ -200,7 +201,8 @@ Five samples make a quick check, not a statistically robust p95 or p99 benchmark
 
 Use `--concurrency <n>` (1–20) to bound simultaneous RPC requests, including
 chain handshakes, optional warm-up, block samples and the optional historical
-and call probes, followed by the optional log probe. Each endpoint's requests remain sequential.
+and call probes, followed by optional log, finality and syncing phases. Each
+endpoint's requests remain sequential.
 A preparation worker finishes one endpoint's handshake and warm-up before moving
 to the next endpoint. Measured workers instead perform one attempt per endpoint
 per round, with a barrier after preparation and after every round.
@@ -606,6 +608,7 @@ The existing report and error categories remain available in both formats.
 | `--logs-address <address>` | None | CLI-only: one optional 20-byte hex address; requires the log pair |
 | `--logs-topic0 <hash>` | None | CLI-only: one optional 32-byte hex topic0; requires the log pair |
 | `--finality` | Off | CLI-only: valueless, once; safe then finalized headers after all earlier phases |
+| `--syncing` | Off | CLI-only: valueless, once; one eth_syncing request after all other phases |
 | `--label <name>` | `RPC N` | Repeat once per endpoint in input order; 1–64 characters after normalization |
 | `--strict` | Off | CLI-only: evaluate every endpoint using the strict CI policy after reporting |
 | `--max-failures <n>` | 0 | CLI-only, requires `--strict`; 0–100 failed measured calls allowed per endpoint, inclusive |
@@ -620,14 +623,15 @@ The existing report and error categories remain available in both formats.
 
 Supply 1–20 distinct HTTP(S) URLs. URL userinfo, fragments, and redirects are refused.
 Response bodies are limited to 1 MiB. Each endpoint receives at most
-**`1 + warmup + samples + H + K + L + 2*F` requests**, where `H=1` only with
+**`1 + warmup + samples + H + K + L + 2*F + S` requests**, where `H=1` only with
 `--historical-block`, `K=1` only with the complete call triplet, `L=1` only
-with the complete log pair, and `F=1` only with `--finality`; otherwise each is zero (handshake, warm-up, measured samples, optional probes).
+with the complete log pair, `F=1` only with `--finality`, and `S=1` only with
+`--syncing`; otherwise each is zero (handshake, warm-up, measured samples, optional probes).
 Failed or mismatched handshakes stop after one request; later failures do not
 reduce the configured attempt count. Warm-up adds up to `warmup × timeout` ms of
 request waiting per accepted endpoint, plus processing overhead. With concurrency
 `C` and `E` selected endpoints, a conservative request-time allowance remains
-`ceil(E / C) × (1 + warmup + samples + H + K + L + 2*F) × timeout` ms. Historical, call and logs each add at
+`ceil(E / C) × (1 + warmup + samples + H + K + L + 2*F + S) × timeout` ms. Historical, call, logs and syncing each add at
 most one timeout per accepted endpoint; finality adds two, sequentially. Each
 feature runs in its own bounded phase.
 When planning a paced run,
@@ -737,7 +741,7 @@ The CLI performs the request/response semantic checks.
 Table and Markdown append a separate historical section with request, phase
 timing, each outcome, projection, errors/skip reasons and limitations. CSV retains
 its original 42 columns in the same order, then appends these **13 columns only
-when enabled** (55 total without call/log probes). Existing CSV quoting/formula
+when enabled** (55 total without call/log/finality/syncing probes). Existing CSV quoting/formula
 protection still applies;
 null fields are empty, while real zero is `0`.
 
@@ -888,7 +892,7 @@ original 42 columns, then the 13 historical columns **if enabled**, then these
 | 57 (70) | `call_phase_finished_ms` |
 | 58 (71) | `call_phase_duration_ms` |
 
-Without log or finality probes, totals are **42 / 55 / 58 / 71** for neither / historical / call / both probes.
+Without log, finality or syncing probes, totals are **42 / 55 / 58 / 71** for neither / historical / call / both probes.
 Use header names. Nulls are empty, actual zeros remain `0`, and existing quoting
 and formula-prefix protection apply. Without the call flags, existing output
 bytes, fields and requests remain unchanged, including historical-only reports.
@@ -1054,7 +1058,7 @@ order (indices below are relative to the log section, beginning after
 | 15 | `logs_phase_finished_ms` |
 | 16 | `logs_phase_duration_ms` |
 
-Without finality, total columns are `42 + 13*H + 16*K + 16*L`: without logs, **42/55/58/71**;
+Without finality or syncing, total columns are `42 + 13*H + 16*K + 16*L`: without logs, **42/55/58/71**;
 with logs, **58/71/74/87** for no earlier probe / historical / call / both.
 Use header names. Null fields are empty, actual zero is `0`; CRLF records,
 quoting and formula-prefix protection remain unchanged. Public settings and phase
@@ -1206,7 +1210,7 @@ after the existing `42 + 13*H + 16*K + 16*L` columns, in this exact order:
 | 22 | `finality_phase_finished_ms` |
 | 23 | `finality_phase_duration_ms` |
 
-Total columns: `42 + 13*H + 16*K + 16*L + 23*F` (65 for finality alone, 110 for
+Without syncing, total columns: `42 + 13*H + 16*K + 16*L + 23*F` (65 for finality alone, 110 for
 all four). Use header names. Nulls are empty cells, actual zeros remain `0`;
 quoting, CRLF and formula-prefix protection are unchanged. Import numbers/hashes
 as text to avoid spreadsheet precision loss or type inference.
@@ -1214,6 +1218,154 @@ as text to avoid spreadsheet precision loss or type inference.
 The demo returns safe/finalized pairs of found/found, null/invalid-params and
 method-unavailable/other-RPC-error. Both tags are attempted independently, while
 baseline rate limits and earlier probe outcomes remain unchanged.
+
+## Optional node sync state
+
+The CLI-only, valueless **`--syncing`** flag performs one read-only `eth_syncing`
+request with `params: []` per endpoint accepted by the handshake/expected-chain
+guard. It runs in its own phase **after all measured rounds and all enabled
+historical, call, log and finality phases**. Accepted endpoints are probed even
+when every measured sample failed; failed or mismatched handshakes are explicitly
+skipped. Same concurrency pool, sequential endpoint requests, unique IDs, complete
+request timeout (headers and body), redirect policy and **1 MiB body limit** apply.
+There are no retries, fallback, extra head/state calls, signing or transactions.
+
+```sh
+node bin/rpc-doctor.js --demo --syncing --json
+node bin/rpc-doctor.js --demo --syncing --markdown --output sync-state.md
+# All optional probes, using public synthetic inputs:
+node bin/rpc-doctor.js --demo --historical-block 0 \
+  --call-to 0x0000000000000000000000000000000000000000 \
+  --call-data 0x --call-block 0 --logs-from 0 --logs-to 99 \
+  --finality --syncing --csv
+```
+
+The flag may appear only once and accepts no assignments (`--syncing=false` is
+invalid). These syntax errors return `2` before config/environment resolution,
+output filesystem access or RPC, even with help/version. Valid help/version skip
+those operations. Config equivalents such as `syncing`, `syncState`, `isSyncing`
+and `eth_syncing` remain unknown fields, including with CLI overrides. Without
+this flag, earlier request traces, fields, report bytes and exit rules are unchanged.
+
+### Validated projection and meaning
+
+The [execution-apis eth_syncing method](https://github.com/ethereum/execution-apis/blob/main/src/eth/client.yaml)
+and [Ethereum JSON-RPC documentation](https://ethereum.org/developers/docs/apis/json-rpc/#eth_syncing)
+describe an object or `false`, with no parameters. The latter describes
+`startingBlock`, `currentBlock`, `highestBlock`, and client-specific extra fields.
+The [upstream schema](https://github.com/ethereum/execution-apis/blob/main/src/schemas/client.yaml)
+is less strict about the boolean/object shape than this probe's local validation:
+RPC Doctor accepts **only literal false or an object containing all three heights**.
+It ignores and discards client-specific extras. `true`, null, strings (including
+`"false"`), arrays, missing fields and malformed fields are `INVALID_RESULT`.
+
+Each required height must be a string with lowercase `0x` prefix and canonical
+hex digits: no leading zeros except `0x0`, no signs, whitespace, fractions or
+exponents. Hex digits may use either case. This probe adds a local **uint256 cap**
+(0 through 2^256−1, at most 64 hex digits) to bound retained values. BigInt parsing
+preserves exact integers; report heights are canonical decimal strings, including
+zero and values above Number.MAX_SAFE_INTEGER. Validation is all-or-nothing;
+an invalid field leaves all three reported heights unavailable. The complete
+provider object, extra fields, raw errors/messages, URLs and headers are omitted.
+
+| Status | `isSyncing` | Heights / meaning |
+| --- | --- | --- |
+| `not_syncing` | false | Provider explicitly returned false; all heights/order are null |
+| `syncing` | true | Valid progress object; only three exact decimal heights and `heightOrder` are retained |
+| `unsupported` | null | Valid matching-ID JSON-RPC `-32601`; `error: RPC_ERROR`, sync state unknown |
+| `error` | null | Invalid result/envelope, other RPC failure or transport failure; sync state unknown |
+| `skipped` | null | No request; `skipReason` is `handshake_failed` or `network_mismatch` |
+
+Only the [standard method-unavailable code](https://www.jsonrpc.org/specification#error_object)
+`-32601` yields unsupported. `-32602` and other valid RPC errors stay `RPC_ERROR`;
+provider messages are never interpreted. Wrong IDs, invalid versions, conflicting
+result/error members or malformed error envelopes give `INVALID_RESPONSE`.
+HTTP 429 is `RATE_LIMITED`; other non-success HTTP responses are `HTTP_ERROR`.
+Network errors, complete-request timeouts and oversize bodies keep `NETWORK_ERROR`,
+`TIMEOUT` and `RESPONSE_TOO_LARGE`. Unexpected failures use `UNKNOWN_ERROR`.
+Neither unsupported nor an error means false, zero, healthy or complete sync.
+
+**Height-order policy:** compare the three validated BigInts only to report
+`heightOrder: nondecreasing` when `startingBlock <= currentBlock <= highestBlock`,
+otherwise `out_of_order`. Equality, including three zeroes, remains a progress
+object. There is no normative ordering constraint in the cited method/schema;
+`highestBlock` is an estimate. Out-of-order values are preserved as a structurally
+valid observation, not rejected, reordered, clamped or explained by guessing a
+client's behavior. No percentage, remaining-block count, completion estimate or
+comparison with the earlier measured/finality heads is calculated. These requests
+observe different times; no consistency across phases or providers is implied.
+
+**False only reports the provider's current claim.** It does not prove complete
+synchronization, trusted freshness, canonicality, peer connectivity, availability
+of state or readiness of a consensus client. A progress object similarly does not
+establish how much work remains or that the node is making progress over time.
+Sync results never change baseline attempts/errors, warm-up, rounds, pacing,
+latency, measured block/lag/status or strict policy. Unknown sync state can coexist
+with a healthy baseline and health exit `0`; false cannot rescue failed baseline
+measurements from exit `1`. Read the separate sync section alongside health.
+
+### Sync fields, timing, limits and CSV
+
+Enabled runs add optional JSON v1 fields: `settings.syncing: true`,
+`syncingPhase` with `startedMs`, `finishedMs`, `durationMs`, and `results[].syncing`.
+Each result object requires `status`, `attempts` (0 skipped, otherwise 1), nullable
+`isSyncing`, `startingBlock`, `currentBlock`, `highestBlock`, `heightOrder`, `error`,
+`skipReason`, `startedMs`, `finishedMs`, `durationMs`. Heights/order are populated
+only for `syncing`; error/skipped state is null. False is a real boolean, never
+substituted for missing information. Zero counters and timings remain actual zero.
+
+Times are rounded nonnegative client milliseconds; offsets use the existing run
+start. Attempts include failures and validation, exclude queue wait and have null
+timings when skipped. Phase time includes scheduling; all-skipped phases still
+have boundaries and can have zero duration. Concurrent durations must not be
+summed. Whole-run elapsed and generation time include this phase. All four formats
+and atomic output retain complete outcomes on health `0`/`1`; file errors keep
+exit `2` and the existing prior-file preservation contract.
+
+The request budget adds **one request** and at most one timeout of request waiting
+per accepted endpoint, plus scheduling/validation. The conservative allowance
+above includes this phase; it is not an enforced whole-run deadline. Aborting a
+request cannot guarantee that remote processing stops. The 1 MiB response cap
+precedes parsing but does not bound total process memory: temporary copies exist.
+Retained sync data is bounded metadata, never the response object.
+
+Schema v1 checks known types, required members, enums and local bounds while
+allowing future additional properties. Old fixtures remain valid. It does not
+prove feature co-occurrence, status/boolean/counter relationships, height-order
+arithmetic, timing consistency or exact uint256 range beyond decimal format and
+78 digits. Runtime semantic validation remains separate. Independent synthetic
+fixtures cover false, progress, zero, large counters, unusual order, unknowns and
+skips without claiming to be live provider observations.
+
+Table and Markdown append a separate sync section after all previous optional
+sections; dynamic Markdown stays escaped. CSV appends these **15 columns** after
+`42 + 13*H + 16*K + 16*L + 23*F` existing columns, in this exact order:
+
+| Offset | Column |
+| --- | --- |
+| 1 | `syncing_status` |
+| 2 | `syncing_attempts` |
+| 3 | `syncing_is_syncing` |
+| 4 | `syncing_starting_block` |
+| 5 | `syncing_current_block` |
+| 6 | `syncing_highest_block` |
+| 7 | `syncing_height_order` |
+| 8 | `syncing_error` |
+| 9 | `syncing_skip_reason` |
+| 10 | `syncing_started_ms` |
+| 11 | `syncing_finished_ms` |
+| 12 | `syncing_duration_ms` |
+| 13 | `syncing_phase_started_ms` |
+| 14 | `syncing_phase_finished_ms` |
+| 15 | `syncing_phase_duration_ms` |
+
+Total columns: `42 + 13*H + 16*K + 16*L + 23*F + 15*S` (57 for syncing alone,
+125 for all five probes). Use header names. Nulls are empty; actual false/true are
+`false`/`true`, and actual zero is `0`. Quoting, CRLF and formula-prefix protection
+remain unchanged. Import block columns as text to preserve exact digits.
+
+The demo returns false, a progress object and method-unavailable for its three
+endpoints, without changing measured rate-limit counters or previous probe results.
 
 ## Atomic report files
 
@@ -1330,8 +1482,8 @@ exit code in CI rather than inferring success from a readable CSV file.
 
 The byte format is UTF-8 without a BOM, comma-separated, with one header and **42
 fields in every record by default**, 55 with historical only, 58 with call only,
-or 71 with both probes; enabling logs appends 16 columns and finality appends
-23 more columns to any combination, as documented above. Every field is
+or 71 with both probes; enabling logs appends 16 columns, finality appends 23
+and syncing appends 15 more columns to any combination, as documented above. Every field is
 double-quoted; embedded quotes are doubled,
 and embedded CR/LF remain inside the quoted field. Records end with CRLF, including
 the final record, with no extra blank record. The CSV follows the quoting and record
@@ -1385,7 +1537,7 @@ precision instead of the table's one-decimal display.
 | 34 | `pacing_wait_ms` | Actual total explicit pacing wait; empty at zero/off interval |
 | 35 | `started_at` | UTC ISO run-start timestamp |
 | 36 | `generated_at` | UTC ISO report-generation timestamp |
-| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and optional historical/call/log/finality phases |
+| 37 | `duration_ms` | Whole-run elapsed ms, including preparation, waits and optional historical/call/log/finality/syncing phases |
 | 38 | `demo` | true for the local synthetic demo; empty otherwise |
 | 39 | `strict_passed` | **Whole-run** strict result, true/false; empty if disabled |
 | 40 | `strict_max_failures` | Allowed measured failures per endpoint; empty if strict disabled |
@@ -1601,6 +1753,8 @@ and `results[].call`, with required members when present. The log probe adds
 optional `settings.logs`, `logsPhase` and `results[].logs` under the same rule.
 Finality adds optional `settings.finality: true`, `finalityPhase` and
 `results[].finality` with required `safe` and `finalized` outcome objects.
+Syncing adds optional `settings.syncing: true`, `syncingPhase` and
+`results[].syncing`, with required members when the object is present.
 Reference/network/warm-up/pacing fields and `demo` are optional because they depend on selected options. **Every known field is checked when
 present**; an optional object still needs its required members. Current output
 omits warm-up/pacing settings at zero; if present, `warmup` and `intervalMs` must

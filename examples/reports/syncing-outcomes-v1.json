@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-13T00:00:00.000Z",
+  "generatedAt": "2026-10-13T00:00:00.003Z",
+  "durationMs": 3,
+  "settings": {
+    "samples": 1,
+    "timeoutMs": 1000,
+    "concurrency": 6,
+    "lagThreshold": 3,
+    "syncing": true
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "startedMs": 1,
+      "finishedMs": 2
+    }
+  ],
+  "syncingPhase": {
+    "startedMs": 2,
+    "finishedMs": 3,
+    "durationMs": 1
+  },
+  "results": [
+    {
+      "endpoint": "Synthetic sync 1",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 5,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "syncing": {
+        "status": "not_syncing",
+        "attempts": 1,
+        "isSyncing": false,
+        "startingBlock": null,
+        "currentBlock": null,
+        "highestBlock": null,
+        "heightOrder": null,
+        "error": null,
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Synthetic sync 2",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 5,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "syncing": {
+        "status": "syncing",
+        "attempts": 1,
+        "isSyncing": true,
+        "startingBlock": "0",
+        "currentBlock": "0",
+        "highestBlock": "0",
+        "heightOrder": "nondecreasing",
+        "error": null,
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Synthetic sync 3",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 5,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "syncing": {
+        "status": "syncing",
+        "attempts": 1,
+        "isSyncing": true,
+        "startingBlock": "0",
+        "currentBlock": "9007199254740993",
+        "highestBlock": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        "heightOrder": "nondecreasing",
+        "error": null,
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Synthetic sync 4",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 5,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "syncing": {
+        "status": "syncing",
+        "attempts": 1,
+        "isSyncing": true,
+        "startingBlock": "5",
+        "currentBlock": "3",
+        "highestBlock": "2",
+        "heightOrder": "out_of_order",
+        "error": null,
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Synthetic sync 5",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 5,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "syncing": {
+        "status": "unsupported",
+        "attempts": 1,
+        "isSyncing": null,
+        "startingBlock": null,
+        "currentBlock": null,
+        "highestBlock": null,
+        "heightOrder": null,
+        "error": "RPC_ERROR",
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    },
+    {
+      "endpoint": "Synthetic sync 6",
+      "chainId": "1",
+      "latestBlock": "1",
+      "attempts": 1,
+      "successes": 1,
+      "errors": {},
+      "latencyMs": {
+        "min": 1,
+        "median": 1,
+        "p95": 1,
+        "max": 1,
+        "stddev": 0,
+        "p99": 1
+      },
+      "latencySampleCount": 1,
+      "successRate": 100,
+      "lagBlocks": "0",
+      "peerCount": 5,
+      "status": "healthy",
+      "observations": [
+        {
+          "round": 1,
+          "startedMs": 1,
+          "finishedMs": 2,
+          "block": "1",
+          "error": null
+        }
+      ],
+      "syncing": {
+        "status": "error",
+        "attempts": 1,
+        "isSyncing": null,
+        "startingBlock": null,
+        "currentBlock": null,
+        "highestBlock": null,
+        "heightOrder": null,
+        "error": "INVALID_RESULT",
+        "skipReason": null,
+        "startedMs": 2,
+        "finishedMs": 3,
+        "durationMs": 1
+      }
+    }
+  ]
+}

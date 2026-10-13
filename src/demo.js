@@ -22,6 +22,13 @@ export async function runDemo(options) {
           return;
         }
         res.setHeader('content-type', 'application/json');
+        if (request.method === 'eth_syncing') {
+          const outcome = delay === 5 ? { result: false }
+            : delay === 35 ? { result: { startingBlock: '0x0', currentBlock: height, highestBlock: '0x100', knownStates: '0x123' } }
+              : { error: { code: -32601, message: 'Synthetic method unavailable.' } };
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...outcome }));
+          return;
+        }
         if (request.method === 'eth_getLogs') {
           const filter = request.params[0];
           const outcome = delay === 5 ? { result: [{

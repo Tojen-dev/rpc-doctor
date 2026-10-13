@@ -1,3 +1,4 @@
+import { SyncingProbeError } from './syncing.js';
 import { FinalityProbeError } from './finality.js';
 import { LogsProbeError, parseLogsOptions } from './logs.js';
 import { CallProbeError, parseCallOptions } from './call.js';
@@ -40,6 +41,7 @@ Options:
   --logs-address <a> Optional single 20-byte hex filter; requires log range
   --logs-topic0 <h>  Optional single 32-byte hex topic0; requires log range
   --finality         Probe safe then finalized headers after other probes (CLI-only)
+  --syncing          One eth_syncing observation after all other probes (CLI-only)
   --strict           Exit 1 when any endpoint fails the CI health policy (CLI-only)
   --max-failures <n>  Allowed failed measured calls per endpoint, 0–100 (default: 0;
                      requires --strict; CLI-only)
@@ -54,7 +56,7 @@ Options:
   --version, -v      Show version
 
 At most 20 endpoints; requests per endpoint stay sequential. No transactions sent.
-Concurrency includes handshakes, warm-up, samples and optional historical/call/log/finality probes;
+Concurrency includes handshakes, warm-up, samples and all optional probes;
 it also applies to --demo.
 All endpoints finish preparation before sampling begins. Each measured round sends
 one call per accepted endpoint and waits for all outcomes before the next round.
@@ -65,9 +67,20 @@ Slow endpoints delay all peers; observations are not synchronized.
 JSON records round boundaries and each attempt's start/finish in elapsed client ms
 from startedAt; the table shows each endpoint's first-start to last-finish window.
 Warm-up follows the network guard; failures and elapsed ms are reported separately.
-Maximum requests per endpoint: 1 + warmup + samples + H + K + L + 2F.
+Maximum requests per endpoint: 1 + warmup + samples + H + K + L + 2F + S.
 H=1 with --historical-block; K=1 with the call triplet; L=1 with the log pair;
-F=1 with --finality; otherwise each is 0.
+F=1 with --finality; S=1 with --syncing; otherwise each is 0.
+--syncing is valueless, at most once, validated before config/env/output/RPC even
+with help/version. One eth_syncing with [] per accepted endpoint after all earlier
+phases, including finality, even when measured samples all failed. Failed/mismatched
+handshakes skip it. Same concurrency, complete timeout and 1 MiB cap; no retry/fallback.
+false means provider-reported not_syncing; a valid object means syncing. Require
+startingBlock/currentBlock/highestBlock as exact canonical hex uint256 quantities;
+retain decimal strings only. true/null/incomplete/malformed results are errors.
+Only valid matching-ID -32601 is unsupported; other errors mean unknown state.
+Height order is descriptive (starting <= current <= highest or out_of_order),
+never a rejection/completion rule. No percentage, freshness or full-sync claim.
+Syncing CSV appends 15 columns; baseline metrics, status and strict are unchanged.
 --finality is valueless, at most once, validated even with help/version.
 After all enabled earlier phases, eth_getBlockByNumber sends ["safe",false] then
 ["finalized",false] per accepted endpoint, even if safe fails. Same concurrency,
@@ -183,6 +196,7 @@ export async function main(args, env, stdout, stderr) {
         'expected-chain': { type: 'string' },
         'historical-block': { type: 'string' },
         finality: { type: 'boolean' },
+        syncing: { type: 'boolean' },
         'logs-from': { type: 'string' }, 'logs-to': { type: 'string' },
         'logs-address': { type: 'string' }, 'logs-topic0': { type: 'string' },
         'call-to': { type: 'string' }, 'call-data': { type: 'string' }, 'call-block': { type: 'string' },
@@ -197,6 +211,9 @@ export async function main(args, env, stdout, stderr) {
     if (values.csv && values.json) throw new Error('Use either --csv or --json, not both.');
     if (values.markdown && (values.csv || values.json)) throw new Error('Use --markdown without --json or --csv.');
     validateOutputOptions(values, parsed.tokens);
+    if (parsed.tokens.filter(t => t.kind === 'option' && t.name === 'syncing').length > 1) {
+      throw new SyncingProbeError('Use --syncing at most once, without a value.');
+    }
     if (parsed.tokens.filter(t => t.kind === 'option' && t.name === 'finality').length > 1) {
       throw new FinalityProbeError('Use --finality at most once, without a value.');
     }
@@ -264,6 +281,7 @@ export async function main(args, env, stdout, stderr) {
         logsAddress: logsRequest.address, logsTopic0: logsRequest.topic0 }),
       ...(historicalBlock === undefined ? {} : { historicalBlock }),
       ...(values.finality ? { finality: true } : {}),
+      ...(values.syncing ? { syncing: true } : {}),
     };
     if (endpoints.length === 0 && config.endpoints !== undefined) {
       endpoints = config.endpoints;
@@ -297,7 +315,7 @@ export async function main(args, env, stdout, stderr) {
   } catch (error) {
     // Only application-controlled messages are allowed; unexpected errors may contain URLs.
     const expected = /^(Use |Provide |Samples |Warm-up |Interval |Timeout |Concurrency |Lag threshold |Reference |Expected chain |Labels |Duplicate |Invalid arguments\.|RPC_DOCTOR_ENDPOINTS_JSON)/;
-    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || error instanceof CallProbeError || error instanceof LogsProbeError || error instanceof FinalityProbeError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
+    stderr.write(`RPC Doctor: ${error instanceof ConfigError || error instanceof HealthPolicyError || error instanceof OutputError || error instanceof HistoricalBlockError || error instanceof CallProbeError || error instanceof LogsProbeError || error instanceof FinalityProbeError || error instanceof SyncingProbeError || expected.test(error.message) ? error.message : 'Unable to complete the check.'}\n`);
     return 2;
   }
 }
